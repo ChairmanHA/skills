@@ -1,0 +1,4 @@
+interface:
+  display_name: "Qt Wayland Frameless Windows"
+  short_description: "Build draggable hosted Qt windows on Wayland"
+  default_prompt: "Use $qt-wayland-frameless-windows to implement a correctly parented draggable frameless Qt window on Wayland."

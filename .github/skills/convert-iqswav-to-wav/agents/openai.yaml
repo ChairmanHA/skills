@@ -1,0 +1,4 @@
+interface:
+  display_name: "Convert IQS-WAV to WAV"
+  short_description: "Convert IQS recordings into compact PCM16 IQ WAV"
+  default_prompt: "Use $convert-iqswav-to-wav to safely convert these IQS-WAV recordings into compact pre-autoscaled ordinary WAV files."

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Minibar Optimistic Enabled"
+  short_description: "Add flicker-free optimistic enabled-state controls"
+  default_prompt: "Use $minibar-optimistic-enabled-workflow to add or fix a minibar enabled-state control with latest-intent UI updates."
