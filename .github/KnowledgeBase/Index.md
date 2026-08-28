@@ -1,7 +1,5 @@
 # Knowledge Base Index
 
-> Current device-startup policy (2026-08-19): normal `Default`/`User` startup does not restore a remembered manual ETH endpoint; USB scanner keeps automatic selection. `Last`, application continuity restart (`APP/Reboot=True`), and `--UpdateCompleted` may restore the last successful ETH endpoint. The startup ETH Connect dialog is a separate compile-time feature and defaults to `OFF`.
-
 ## Recent Additions
 
 | Document | Description |

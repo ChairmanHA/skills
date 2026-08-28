@@ -64,6 +64,7 @@
 
 ### 3.3 Trigger Out
 
+- Trigger Source
 - Trigger Action
 - Trigger Edge
 - Trigger Output
@@ -71,6 +72,8 @@
 语义：
 
 - 这一组定义“设备在运行过程中，如何对外输出时序标记”。
+- `Source` 可选择当前 TX Channel，或选择原始 `Trigger Event`。
+- `Trigger Event` 表示输入触发事件发生后立即输出信号，不再按通道 Hop/Sweep 重计数。
 - `Action` 表示按 Hop 还是按 Sweep 产生输出触发脉冲。
 - `Edge` 表示输出边沿。
 - `Trigger Output` 表示输出使能开关。
@@ -110,7 +113,7 @@
 
 - Ref Output
 - Trigger In 的 Trigger Edge
-- Trigger Out 的 Trigger Output
+- Trigger Out 第二行的 Trigger Edge 与 Trigger Output
 - LO Mode
 - Fan Mode
 
@@ -147,6 +150,7 @@ CorePlugin 当前为集中设备设置页提供如下公共 property：
 - `TriggerSource`
 - `TriggerAction`
 - `TriggerEdge`
+- `TriggerOutSource`
 - `TriggerOutAction`
 - `TriggerOutEdge`
 - `TriggerOutState`
@@ -169,6 +173,7 @@ CorePlugin 当前为集中设备设置页提供如下公共 property：
 - `TriggerSource`
 - `TriggerAction`
 - `TriggerEdge`
+- `TriggerOutSource`
 - `TriggerOutAction`
 - `TriggerOutEdge`
 - `TriggerOutState`
@@ -196,6 +201,7 @@ TxSessionService 在构建 `TxApplyRequest` 时，会从 `CommonDeviceProfile` �
 - `triggerSource`
 - `triggerAction`
 - `triggerEdge`
+- `triggerOutSource`
 - `triggerOutAction`
 - `triggerOutEdge`
 - `triggerOutState`
@@ -217,11 +223,15 @@ TxSessionService 在构建 `TxApplyRequest` 时，会从 `CommonDeviceProfile` �
 
 在 `FancyDevice::applyCommonDeviceSettingsLocked()` 中：
 
-- `channel_config_trigger()` 接收 Trigger In 的 source / action / edge / count。
+- 每次设备 open 后的第一次公共配置无条件执行 `tx_config_ffm()`；随后各模式和 RF 开关引起的公共配置会先 `tx_query_ffm()`，查询成功且 center/level 与目标一致时跳过 FFM 重配，任一参数不同或 query 失败时仍执行配置。
+- Trigger In 的 source / action / edge / count 先缓存为当前 stream 触发策略；外部 Rising / Falling 会分别映射为 `TRIGGER_SOURCE_EXTERNAL_RISING_EDGE / TRIGGER_SOURCE_EXTERNAL_FALLING_EDGE`。
+- CW、Realtime 与 Playback 都通过 `tx_config_stream(..., stream0, tx_stream, stream_trigger)` 下发，`source / response_count` 属于 `stream_trigger`。
+- `channel_config_trigger(..., stream0, action)` 只负责把 stream0 与通道 Hop/Sweep 动作绑定。
 - `device_config_trigger_out()` 接收新版设备级 Trigger Out 的 state / source / negative pulse / recounter。
-- `source` 使用现有 `primaryTxChannel()->num`，并只接受新版头文件定义的 `CHANNEL0 / CHANNEL1`，不会假定当前主 TX 一定是通道 0。
+- Trigger Out Source 为 Channel 时，`source` 使用现有 `primaryTxChannel()->num`，并只接受新版头文件定义的 `CHANNEL0 / CHANNEL1`，不会假定当前主 TX 一定是通道 0。
+- Trigger Out Source 为 Trigger Event 时，`source = TRIGGER_EVENT`，触发事件发生后立即输出，`recounter` 被 API 忽略。
 - 旧页面的 Rising / Falling 分别映射新版正 / 负脉冲。
-- 当前产品映射为：Trigger Output 控制 state，Hop 使用 `recounter = 1`，Sweep/Scan 使用 `recounter = 10`。
+- Channel 源下的产品映射为：Trigger Output 控制 state，Hop 使用 `recounter = 1`，Sweep/Scan 使用 `recounter = 10`。
 - FScan、LScan、MScan、Streaming 和 Playback 专用路径不重复配置 Trigger Out。
 
 H2 API 已修复此前 `recounter = 10` 可能令设备会话失效的问题，因此 Trigger Out 的使能、通道、脉冲极性和 Hop/Sweep 重计数均重新按 UI/Common Profile 动态下发。
@@ -230,7 +240,7 @@ H2 API 已修复此前 `recounter = 10` 可能令设备会话失效的问题，�
 
 在 `FancyDevice::fillWritebackProfileLocked()` 中：
 
-- `channel_query_trigger()` 回写 Trigger In 的 source / action / edge。
+- 已配置 stream 的模式通过 `tx_query_stream()` 回写 Trigger In 的 source / response count，通过 `channel_query_trigger()` 回写绑定的 stream 与 action；外部上/下沿 source 再拆回 UI 的 External + Edge。
 - 新版 H2 API 没有 Trigger Out query；整次设备配置成功后，writeback 保留本次 Trigger Out 请求值。
 - `channel_query_lo_mode()` 回写 LO Mode。
 
@@ -257,12 +267,13 @@ H2 API 已修复此前 `recounter = 10` 可能令设备会话失效的问题，�
 
 ### 6.5 Low Power 的当前实现
 
-`FancyDevice::open()` 使用现有的 PGA 单口供电判据 `Plugin::usbPortOnly()` 设置每次 open 的默认值：
+`FancyDevice::open()` 使用现有的 PGA 单口供电判据 `Plugin::usbPortOnly()` 设置每次 open 的 Low Power 策略默认值，但硬件 open 初始化统一先进入 `POWERON`：
 
-- `PGA_PowerSourceType == 1`：调用 `device_config_power_state(..., POWEROFF)`，设备缓存与 UI 默认显示 Low Power ON。
-- 其他设备：调用 `device_config_power_state(..., POWERON)`，设备缓存与 UI 默认显示 Low Power OFF。
+- 所有设备：open 阶段先调用 `device_config_power_state(..., POWERON)`，并保证随后第一次公共配置无条件执行一次 `tx_config_ffm()`。
+- `PGA_PowerSourceType == 1`：Low Power 策略缓存与 UI 默认显示 ON；首次 Mute 配置完成后再进入 `POWEROFF`。
+- 其他设备：Low Power 策略缓存与 UI 默认显示 OFF，后续保持 `POWERON`。
 
-H2 API 当前没有 power-state query，因此 `queryLowPowerEnabled()` 返回本次设备 open 或最近一次成功编辑的缓存值。页面点击后直接调用 `configureLowPowerEnabled()`；ON/OFF 分别映射 `POWEROFF` / `POWERON`，失败时回退显示缓存值。
+H2 API 当前没有 power-state query，因此 `queryLowPowerEnabled()` 返回本次设备 open 或最近一次成功编辑的策略缓存值。页面点击后调用 `configureLowPowerEnabled()` 更新策略；ON/OFF 分别映射后续 Mute/非 Mute 配置中的 `POWEROFF` / `POWERON`，失败时回退显示缓存值。
 
 Low Power 的视觉状态继续由业务 `checked` 值承载。所有 `configuration_files/*/theme.css` 与 `theme_light.css` 模板都把 `#lowPowerBtn` 纳入 Trigger Output 的同组选择器，因此按钮本体、上下两行间距和 `parentChecked` 状态文字会沿用 Trigger Output 的主题样式；深色主题 ON 状态为绿色。
 

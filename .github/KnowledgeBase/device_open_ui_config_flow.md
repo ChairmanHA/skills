@@ -65,7 +65,8 @@
   - 立即发布新的 unavailable capability revision，再 `emit currentDeviceOpenStateChanged(false);`
   - I/O worker open 成功后，`FancyDevice` 先调用 `device_query_options()`；`OPTION_BW_320M_TX` 决定 Playback 为125 MSPS/125 MiB基线，或200 MSPS连续档 + 400 MSPS单点/1000 MiB扩展档
   - `device_query_options()` 失败时记录 warning 并使用保守基线，不按 model 推测扩展能力
-  - `FancyDevice` 随后调用 `device_config_power_state()`：PGA 单口供电（`PGA_PowerSourceType == 1`）默认 `POWEROFF` / Low Power ON，其他设备默认 `POWERON` / Low Power OFF
+  - `FancyDevice` 随后无条件请求一次 `device_config_power_state(..., POWERON)`，保证 open 初始化和首次 FFM 配置发生在上电状态；Low Power 仍是独立的 RF 联动策略缓存，PGA 单口供电设备默认策略为 ON，其他设备默认策略为 OFF
+  - open 成功后第一次公共设备配置无条件调用 `tx_config_ffm()`；后续配置先 `tx_query_ffm()`，仅当 center/level 与目标不一致或 query 失败时才重新调用 `tx_config_ffm()`
   - 随后发布最终 capability revision 并同步完成 business reconcile
   - 最后 `emit currentDeviceOpenStateChanged(true);`
 

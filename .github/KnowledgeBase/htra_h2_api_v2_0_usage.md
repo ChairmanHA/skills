@@ -1,6 +1,6 @@
 # HTRA H2 API v2.0 使用与软件建模指南
 
-本文档面向本仓库当前集成的 HTRA H2 API，即 `3rdParty/h2_api/include/h2_api.h` 与 `3rdParty/h2_api/include/h2_typedef.h` 中定义的 API v2.0.28。本文不只解释“怎么调函数”，还要说明这些函数组合背后的业务语义，以及软件为什么必须围绕 API 能力而不是围绕页面名字设计。
+本文档面向本仓库当前集成的 HTRA H2 API，即 `3rdParty/h2_api/include/h2_api.h` 与 `3rdParty/h2_api/include/h2_typedef.h` 中定义的 API v2.0.34。本文不只解释“怎么调函数”，还要说明这些函数组合背后的业务语义，以及软件为什么必须围绕 API 能力而不是围绕页面名字设计。
 
 核心原则只有一句话：软件是 API 能力的展示层，不是另起一套真相源。UI、business、provider、runtime、orchestrator，都应该是对 API 能力边界的组织、约束和可视化，而不是脱离 API 再造概念。
 
@@ -52,9 +52,7 @@
   - `tx_config_fscan`
   - `tx_config_lscan`
   - `tx_config_mscan`
-  - `tx_config_cw`
-  - `tx_config_playback`
-  - `tx_config_stream`
+  - `tx_config_stream`（统一承载 CW、Realtime 与 Playback）
   - `channel_config_trigger`
   - `channel_start`
   - `channel_stop`
@@ -70,7 +68,7 @@
 `state` 只有 `STATE_OFF` 和 `STATE_ON` 两个值，典型用于：
 
 - `tx_config_output(channel* ch, state rfout, state mod)`
-- `trigger_out.enable`
+- `device_trigger_out.state`
 - `gnss_info.locked`
 - `device_config_clock(..., state out)` 的系统时钟输出开关
 
@@ -80,7 +78,7 @@
 
 `h2_typedef.h` 当前约定：
 
-- `STATUS_NOERROR = 0`：成功。
+- `H2_NOERROR = 0`：成功。
 - 小于 0：错误，表示当前链路应立即中止，例如 `STATUS_ERROR_DISCONNECT = -8`。
 - 大于 0：警告，典型如参数越界被钳位、超时、默认校准文件生效。
 
@@ -167,9 +165,7 @@
 
 对应 API：
 
-- `tx_config_cw`
-- `tx_config_playback`
-- `tx_config_stream`
+- `tx_config_stream`（`tx_stream::mode` 取 `TX_CW`、`TX_REALTIME` 或 `TX_PLAYBACK`）
 - `tx_clear_waveform`
 - `tx_download_waveform`
 - `tx_send_stream`
@@ -188,8 +184,7 @@
 
 - `channel_config_trigger`
 - `channel_query_trigger`
-- `channel_config_trigger_out`
-- `channel_query_trigger_out`
+- `device_config_trigger_out`
 - `channel_preset`
 - `tx_config_output`
 - `tx_query_output`
@@ -235,27 +230,29 @@
 
 ## 5. 触发模型：API 实际在表达什么
 
-### 5.1 输入触发 `tx_trigger`
+### 5.1 输入触发 `stream_trigger`
 
-`channel_config_trigger(channel* ch, const tx_trigger* trg)` 定义的是“收到一次触发时，通道要怎么推进”。
+从 2.0.34 开始，输入触发以 stream 为配置单元。`tx_config_stream(channel* ch, int16_t strm, const tx_stream* setting, const stream_trigger* trg)` 同时配置 stream 业务模式和触发响应，`channel_config_trigger(channel* ch, int16_t strm, uint8_t ch_action)` 再把该 stream 与通道动作绑定。
 
 关键字段：
 
 - `source`：触发从哪里来。
   - `TRIGGER_SOURCE_BUS`
-  - `TRIGGER_SOURCE_EXTERNAL`
+  - `TRIGGER_SOURCE_EXTERNAL_RISING_EDGE`
+  - `TRIGGER_SOURCE_EXTERNAL_FALLING_EDGE`
   - `TRIGGER_SOURCE_XPPS`
-- `edge`：外部边沿类型，BUS 触发下通常只是保持显式配置一致。
-- `action`：每次触发时做什么。
+- `response_count`：响应触发的次数，`-1` 表示无限次。
+- `ch_action`：通过 `channel_config_trigger()` 配置每次触发时通道做什么。
   - `TRIGGER_ACTION_HOP`：前进一步。
   - `TRIGGER_ACTION_SWEEP`：执行一次完整列表或完整扫描。
-- `count`：响应触发的次数，`-1` 表示无限次。
+
+旧版独立的 `edge` 字段已移除，上升沿/下降沿直接编码在外部触发源中；旧版 `tx_trigger` 也不再存在。
 
 软件建模含义：trigger policy 应独立建模。它既不等于 RF plan，也不等于 provider。
 
-### 5.2 输出触发 `trigger_out`
+### 5.2 输出触发 `device_trigger_out`
 
-`channel_config_trigger_out(channel* ch, const trigger_out* trg)` 定义的是“设备内部发生某类动作时，要不要从硬件端口打一个同步脉冲”。
+`device_config_trigger_out(void** device, const device_trigger_out* trg)` 定义的是“设备内部发生某类动作时，要不要从硬件端口打一个同步脉冲”。`source` 为 `CHANNEL0 / CHANNEL1` 时，`recounter` 决定按 Hop 或 Sweep 输出；`source` 为 `TRIGGER_EVENT` 时，每次原始触发事件发生后立即拉输出信号，此时 `recounter` 被忽略。脉冲极性使用 `TRIGGER_PULSE_POSITIVE / TRIGGER_PULSE_NEGATIVE`。
 
 这通常用于：
 
@@ -382,8 +379,8 @@ device_close(&device);
 
 1. 配设备级公共参数。
 2. 配 RF 载波计划。
-3. 配触发策略。
-4. 配基带来源。
+3. 通过 `tx_config_stream()` 一次配置基带来源与 stream 触发源/响应次数。
+4. 通过 `channel_config_trigger()` 把 stream 绑定到通道动作。
 5. 配输出开关。
 6. `channel_start()`。
 7. 根据触发源决定是否调用 `channel_bus_trigger(ch, 0)`。
@@ -392,8 +389,8 @@ device_close(&device);
 
 1. `device_config_clock()` / `device_config_gnss()` 等。
 2. `tx_config_ffm()` 或 `tx_config_*scan()`。
-3. `channel_config_trigger()`。
-4. `tx_config_cw()` / `tx_config_playback()` / `tx_config_stream()`。
+3. `tx_config_stream(..., &setting, &streamTrigger)`。
+4. `channel_config_trigger(ch, 0, action)`。
 5. `tx_config_output()`。
 6. `channel_start()`。
 7. `channel_bus_trigger(ch, 0)` 或等待外部 / XPPS。
@@ -403,7 +400,7 @@ device_close(&device);
 1. trigger policy 应先配置，trigger event 应后发生。
 2. mode 配置和 waveform 下载必须在 `channel_start()` 之前完成。
 3. `channel_start()` 之后是否立即开始，取决于触发源与设备固件语义，不应在软件中想当然。
-4. 软件实现里应显式分支：只有 `TRIGGER_SOURCE_BUS` 才主动调用 `channel_bus_trigger(ch, 0)`；`TRIGGER_SOURCE_EXTERNAL / TRIGGER_SOURCE_XPPS` 应保持等待态。
+4. 软件实现里应显式分支：只有 `TRIGGER_SOURCE_BUS` 才主动调用 `channel_bus_trigger(ch, 0)`；外部上/下沿或 `TRIGGER_SOURCE_XPPS` 应保持等待态。
 
 ---
 
@@ -412,18 +409,20 @@ device_close(&device);
 目标：RF ON，MOD OFF，固定频点持续输出。
 
 ```cpp
-int status = STATUS_NOERROR;
+int status = H2_NOERROR;
 
 status = tx_config_ffm(&ch[0], 1.0e9, -10.0f);
 
-tx_trigger trg{};
-trg.source = TRIGGER_SOURCE_BUS;
-trg.edge = TRIGGER_EDGE_RISING;
-trg.action = TRIGGER_ACTION_SWEEP;
-trg.count = -1;
-status = channel_config_trigger(&ch[0], &trg);
+tx_stream setting{};
+setting.state = STATE_ON;
+setting.mode = TX_CW;
 
-status = tx_config_cw(ch);
+stream_trigger trg{};
+trg.source = TRIGGER_SOURCE_BUS;
+trg.response_count = -1;
+status = tx_config_stream(&ch[0], 0, &setting, &trg);
+status = channel_config_trigger(&ch[0], 0, TRIGGER_ACTION_SWEEP);
+
 status = tx_config_output(ch, STATE_ON, STATE_OFF);
 status = channel_start(ch);
 status = channel_bus_trigger(ch, 0);
@@ -462,28 +461,33 @@ status = tx_download_waveform(&device, iq, points, &waveformId);
 
 status = tx_config_ffm(&ch[0], 1.0e9, -10.0f);
 
-tx_trigger trg{};
+stream_trigger trg{};
 trg.source = TRIGGER_SOURCE_BUS;
-trg.edge = TRIGGER_EDGE_RISING;
-trg.action = TRIGGER_ACTION_SWEEP;
-trg.count = -1;
-status = channel_config_trigger(&ch[0], &trg);
+trg.response_count = -1;
 
 int16_t waveList[] = { static_cast<int16_t>(waveformId) };
 int32_t repeat[] = { -1 };
 double sampleRate[] = { 50e6 };
-status = tx_config_playback(&ch[0], waveList, repeat, sampleRate, 1);
+tx_stream setting{};
+setting.state = STATE_ON;
+setting.mode = TX_PLAYBACK;
+setting.waveforms = 1;
+setting.waveform = waveList;
+setting.repeat = repeat;
+setting.playback_srate = sampleRate;
+status = tx_config_stream(&ch[0], 0, &setting, &trg);
+status = channel_config_trigger(&ch[0], 0, TRIGGER_ACTION_SWEEP);
 
 status = tx_config_output(ch, STATE_ON, STATE_ON);
 status = channel_start(ch);
 status = channel_bus_trigger(ch, 0);
 ```
 
-如果触发源改为 `TRIGGER_SOURCE_EXTERNAL` 或 `TRIGGER_SOURCE_XPPS`，则上面最后一步不应改写成 BUS fire，而应停在 `channel_start()` 后等待硬件事件。
+如果触发源改为 `TRIGGER_SOURCE_EXTERNAL_RISING_EDGE`、`TRIGGER_SOURCE_EXTERNAL_FALLING_EDGE` 或 `TRIGGER_SOURCE_XPPS`，则上面最后一步不应改写成 BUS fire，而应停在 `channel_start()` 后等待硬件事件。
 
 ### 10.3 多波形与触发推进
 
-`tx_config_playback()` 的核心不是“只配一个波形”，而是配一整个回放序列：
+`tx_config_stream()` 的 `TX_PLAYBACK` 模式核心不是“只配一个波形”，而是配一整个回放序列：
 
 - `waveform[]`：设备中已下载好的 waveform id 列表。
 - `repeat[]`：每个 waveform 被选中后自身重复多少次。
@@ -536,20 +540,23 @@ Stream 是“设备进入实时接收 IQ 帧的模式，然后主机持续调用
 ```cpp
 int status = tx_config_ffm(&ch[0], 1.0e9, -10.0f);
 
-tx_trigger trg{};
-trg.source = TRIGGER_SOURCE_BUS;
-trg.edge = TRIGGER_EDGE_RISING;
-trg.action = TRIGGER_ACTION_SWEEP;
-trg.count = -1;
-status = channel_config_trigger(&ch[0], &trg);
+tx_stream setting{};
+setting.state = STATE_ON;
+setting.mode = TX_REALTIME;
+setting.realtime_srate = 50e6;
 
-status = tx_config_stream(&ch[0], 50e6);
+stream_trigger trg{};
+trg.source = TRIGGER_SOURCE_BUS;
+trg.response_count = -1;
+
+status = tx_config_stream(&ch[0], 0, &setting, &trg);
+status = channel_config_trigger(&ch[0], 0, TRIGGER_ACTION_SWEEP);
 status = tx_config_output(ch, STATE_ON, STATE_ON);
 status = channel_start(ch);
 status = channel_bus_trigger(ch, 0);
 
 for (;;) {
-    status = tx_send_stream(&ch[0], iq, points);
+    status = tx_send_stream(&ch[0], 0, iq, points);
     if (status < 0) {
         break;
     }
@@ -587,14 +594,16 @@ Streaming 在软件中应被建模为“带生命周期的异步会话”：
 ```cpp
 int status = tx_config_fscan(&ch[0], start, stop, step, level, dwell);
 
-tx_trigger trg{};
-trg.source = TRIGGER_SOURCE_BUS;
-trg.edge = TRIGGER_EDGE_RISING;
-trg.action = TRIGGER_ACTION_SWEEP;
-trg.count = -1;
-status = channel_config_trigger(&ch[0], &trg);
+tx_stream setting{};
+setting.state = STATE_ON;
+setting.mode = TX_CW;
 
-status = tx_config_cw(ch);
+stream_trigger trg{};
+trg.source = TRIGGER_SOURCE_BUS;
+trg.response_count = -1;
+status = tx_config_stream(&ch[0], 0, &setting, &trg);
+status = channel_config_trigger(&ch[0], 0, TRIGGER_ACTION_SWEEP);
+
 status = tx_config_output(ch, STATE_ON, STATE_OFF);
 status = channel_start(ch);
 status = channel_bus_trigger(ch, 0);
@@ -624,20 +633,23 @@ float dwell[] = { 1e-3f, 10e-3f, 20e-3f, 30e-3f };
 
 int status = tx_config_mscan(ch, fc, level, dwell, 4);
 
-tx_trigger trg{};
+tx_stream setting{};
+setting.state = STATE_ON;
+setting.mode = TX_CW;
+
+stream_trigger trg{};
 trg.source = TRIGGER_SOURCE_BUS;
-trg.edge = TRIGGER_EDGE_RISING;
-trg.action = TRIGGER_ACTION_SWEEP;
-trg.count = -1;
-status = channel_config_trigger(ch, &trg);
+trg.response_count = -1;
+status = tx_config_stream(ch, 0, &setting, &trg);
+status = channel_config_trigger(ch, 0, TRIGGER_ACTION_SWEEP);
 
-trigger_out trgout{};
-trgout.enable = STATE_ON;
-trgout.action = TRIGGER_ACTION_HOP;
-trgout.edge = TRIGGER_EDGE_RISING;
-status = channel_config_trigger_out(ch, &trgout);
+device_trigger_out trgout{};
+trgout.state = STATE_ON;
+trgout.source = CHANNEL0;
+trgout.negative_pulse = TRIGGER_PULSE_POSITIVE;
+trgout.recounter = 1;
+status = device_config_trigger_out(&device, &trgout);
 
-status = tx_config_cw(ch);
 status = tx_config_output(ch, STATE_ON, STATE_OFF);
 status = channel_start(ch);
 status = channel_bus_trigger(ch, 0);
@@ -705,7 +717,7 @@ Sweep 这组 API 说明：
 ```cpp
 gnss_info g{};
 int status = device_query_gnss_info(&device, &g);
-if (status == STATUS_NOERROR) {
+if (status == H2_NOERROR) {
     // g.locked
     // g.sat_nums
     // g.snr_max / g.snr_avg / g.snr_min
@@ -725,13 +737,16 @@ if (status == STATUS_NOERROR) {
 ### 13.4 XPPS 触发
 
 ```cpp
-tx_trigger trg{};
-trg.source = TRIGGER_SOURCE_XPPS;
-trg.edge = TRIGGER_EDGE_RISING;
-trg.action = TRIGGER_ACTION_SWEEP;
-trg.count = 1;
+tx_stream setting{};
+setting.state = STATE_ON;
+setting.mode = TX_CW;
 
-int status = channel_config_trigger(&ch[0], &trg);
+stream_trigger trg{};
+trg.source = TRIGGER_SOURCE_XPPS;
+trg.response_count = 1;
+
+int status = tx_config_stream(&ch[0], 0, &setting, &trg);
+status = channel_config_trigger(&ch[0], 0, TRIGGER_ACTION_SWEEP);
 status = channel_start(ch);
 // 不调用 channel_bus_trigger，等待 XPPS 上升沿
 ```
@@ -783,11 +798,9 @@ UI 层更稳妥的做法不是在下发阶段偷偷改写 XPPS 参数，而是�
 - `tx_query_lscan`
 - `tx_query_mscan`
 - `channel_query_trigger`
-- `channel_query_trigger_out`
 - `channel_query_lo_mode`
 - `tx_query_output`
 - `tx_query_stream`
-- `tx_query_playback`
 - `device_query_state`
 - `device_query_options`
 - `device_query_clock`

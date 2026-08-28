@@ -187,3 +187,7 @@ wayland”调用 `useLayerShell()`；它没有先确认 compositor 协议能力�
 更深入的 surface、visual geometry、popup 和 overlay 排障规则见
 `minibar_wayland_layershell_debug_guide.md` 与
 `minibar_wayland_layer_shell_qt_integration.md`。
+
+## Physical keyboard and mouse input policy
+
+Linux x86_64 deployments are expected to have a physical keyboard and mouse. Ordinary text inputs, including ETH IP and SCPI port fields, do not install software-keyboard trigger filters. The shared `Controls::Keyboard::showPopup()` entry point is also a no-op on x86_64, preventing file-name or generic text inputs from accidentally opening the legacy application keyboard. This input policy is architecture-based and remains valid if an x86_64 Wayland package is restored in the future.

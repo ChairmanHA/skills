@@ -489,3 +489,10 @@ managed overlay。X11 目标机可能有 Composite 扩展但没有 compositor，
 - `src/libs/business/powerunitadapter.cpp`
 - `src/libs/business/powerstepunitadapter.cpp`
 
+## 9. SCPI port fields on Linux aarch64
+
+`SCPIDialog` treats `Control Port` and `Data Port` as integer-only embedded-device inputs. On Linux aarch64, both fields use `TouchNumKeyboard` for both xcb/X11 and Wayland; this choice is compile-time platform policy and does not depend on `QGuiApplication::platformName()`.
+
+The SCPI caller uses `PropertyBindingHelper::prepareNumericKeyBoard()` with an empty unit type, zero decimals, step 1, and range `0..65535`. The current port is copied into the adapter before presentation, and the selected line edit is updated only after an Accepted result. The line edit focus is cleared before `open()` so a Wayland input method cannot compete with the managed numeric keyboard. The existing `TouchNumKeyboard` presentation layer remains responsible for choosing its X11 top-level tool or Wayland hosted overlay.
+
+x86_64 builds do not install the SCPI port keyboard event filters and rely on their physical keyboard and mouse. Eligible non-x86_64 Tablet builds retain `Controls::Keyboard`; when that path is enabled, the same event filter must cover both SCPI port fields so their behavior cannot diverge again.

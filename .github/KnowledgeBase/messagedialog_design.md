@@ -286,12 +286,12 @@ hosted 层级约束只属于 MainWindow 可见的普通 UI 路径。
 `applyMessageType(SG::EMsgType type)`：
 
 - `MSG_INFO`：标题 Info
-- `MSG_QUESTION`：`Qt::ApplicationModal` + 标题 Question + **隐藏标题栏关闭按钮**（`TitleBar::NoButtons`）
+- `MSG_QUESTION`：`Qt::ApplicationModal` + 标题 Question + **显示标题栏关闭按钮**（`TitleBar::CloseButton`）；点击关闭按钮沿用 `QDialog::reject()` 的取消语义
 - `MSG_WARNING`：`Qt::ApplicationModal` + 标题 Warning
 - `MSG_ERROR/MSG_FAILED`：`Qt::ApplicationModal` + 标题 Error
 - 其他：默认 Success
 
-> 设计意图：Question 类型强制用户通过明确按钮选择，不允许点右上角关闭绕过。
+> 设计意图：Question 类型保持与语言/主题重启提示一致，始终显示右上角关闭按钮；点击关闭按钮按取消（reject）语义结束弹窗，不会触发 Yes 确认分支。
 
 ---
 

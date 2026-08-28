@@ -58,16 +58,17 @@
 
 最终实现没有把 DBus 逻辑散落到每个业务对话框里，而是收敛到共享抽象 `Controls::Keyboard`：
 
-- Linux 下，`Keyboard::showPopup(QLineEdit*)` 不再显示旧的自绘字母键盘面板。
-- 它改为走“系统输入面板请求链”。
+- Linux xcb/X11 下，`Keyboard::showPopup(QLineEdit*)` 显示旧的自绘字母键盘面板。
+- Linux Wayland 下，它优先走“系统输入面板请求链”。
 - 在 Qt 输入法请求之后，再调用树莓派桌面当前可用的 DBus 服务 `sm.puri.OSK0.SetVisible(true)`。
+- session bus、OSK0 服务、接口或 `SetVisible(true)` 调用不可用时，立即回退到旧的自绘字母键盘。
 - 关闭或失焦时，再通过同一条共享路径执行 `SetVisible(false)`。
+- Windows 下该共享入口不弹出旧键盘。
 
 这样做的直接收益是：
 
 - `EthConnectDialog`、`PxSaveFileDlg`、`InputDialog` 这类仍复用 `Controls::Keyboard` 的普通文本输入，不需要各自重复实现 DBus 细节。
-- Win32 行为不变。
-- 在没有系统键盘或没有该 DBus 服务的 Linux 环境下，只会安全退化为 no-op，不会崩溃。
+- 在没有系统键盘或没有该 DBus 服务的 Wayland 环境下，会安全回退到旧键盘，不会崩溃。
 
 ## 4. 关键代码位置
 
@@ -84,7 +85,7 @@
 
 ### 5.1 show 路径
 
-Linux 下，`Controls::Keyboard::showPopup(QLineEdit*)` 的职责是：
+Linux Wayland 下，`Controls::Keyboard::showPopup(QLineEdit*)` 的系统键盘路径职责是：
 
 1. 校验目标输入框仍然存在、可见、可用。
 2. 确保目标控件开启 `WA_InputMethodEnabled`。
@@ -93,16 +94,29 @@ Linux 下，`Controls::Keyboard::showPopup(QLineEdit*)` 的职责是：
 5. 发送 `QEvent::RequestSoftwareInputPanel`。
 6. 调用 `QGuiApplication::inputMethod()->show()`。
 7. 调用 DBus：`sm.puri.OSK0.SetVisible(true)`。
+8. 若 DBus 调用失败，隐藏 Qt 输入法并显示旧的自绘字母键盘。
 
-第 7 步就是树莓派 Wayland 环境下的关键回退。
+第 7 步是树莓派 Wayland 环境下的显式系统接口，第 8 步是该接口失败后的应用内回退。Linux xcb/X11 不进入这条路径，直接显示旧键盘。
+
+### 5.1.1 X11 旧键盘的外点关闭契约
+
+旧键盘使用 `Qt::Popup`。Qt 默认会关闭被外点命中的 popup，并把该 mouse press 回放给下层控件。文件名 `QLineEdit` 本身又会在 press/touch/focus 事件中调用 `showPopup()`，因此必须避免在旧 popup 的 Close 已开始、Hide 尚未完成时用同一个按压重开同一对象。
+
+当前约束是：
+
+- 窗口范围外的按压关闭旧键盘前设置 `Qt::WA_NoMouseReplay`，消费这次关闭手势；用户需要下一次独立按压才能操作下层控件。
+- 旧键盘仍可见时，重复的 `showPopup()` 请求直接返回。
+- Hide 完成后清理旧键盘后端状态。
+
+否则会形成 `Close -> replay to QLineEdit -> Show -> old Hide` 的重入链，使 `QApplication::activePopupWidget()` 指向已经隐藏的 Keyboard；后续鼠标、触摸与焦点事件持续被隐藏 popup 截获，表现为输入失效与键盘区域闪烁。
 
 ### 5.2 hide 路径
 
-Linux 下，`Controls::Keyboard::hidePopup()` 的职责是：
+Linux 下，`Controls::Keyboard::hidePopup()` 会根据本次实际选择的后端成对收口：
 
 1. 清理当前 pending 输入目标。
-2. 调用 `QGuiApplication::inputMethod()->hide()`。
-3. 调用 DBus：`sm.puri.OSK0.SetVisible(false)`。
+2. 系统键盘后端：调用 `QGuiApplication::inputMethod()->hide()` 和 DBus `sm.puri.OSK0.SetVisible(false)`，再恢复主窗口全屏。
+3. 旧键盘后端：只隐藏应用内自绘键盘，不调用 OSK0，也不切换主窗口全屏状态。
 
 这样可以保证：
 
@@ -154,7 +168,7 @@ Linux 下，`Controls::Keyboard::hidePopup()` 的职责是：
 
 来调用 `Keyboard::showPopup(ui->name)`。
 
-由于 `Keyboard` 在 Linux 下已经切换为系统键盘请求路径，文件保存流程不再弹仓库里旧的自绘字母键盘面板，而是复用系统键盘。
+Wayland + OSK0 可调用时，文件保存流程复用系统键盘；Linux xcb/X11 或 Wayland 下 OSK0 调用失败时，文件保存流程回退到旧的自绘字母键盘。
 
 ## 7. DBus 回退为何放在 `Controls::Keyboard`
 
@@ -273,17 +287,9 @@ grim /tmp/sgstudio-osk.png
 
 ### 11.2 无系统键盘环境必须允许安全降级
 
-例如：
+例如没有安装 squeekboard 的 Wayland Linux 设备，`Keyboard` 必须允许 Qt 输入法或 DBus 调用失败，并回退到旧键盘。X11/xcb 不尝试调用 OSK0，直接使用旧键盘。
 
-- X11 的 rk3588
-- 没有安装 squeekboard 的 Linux 设备
-
-在这些环境里，`Keyboard` 的 Linux 路径必须允许：
-
-- Qt 输入法调用失败也不崩溃。
-- DBus 服务不存在时直接跳过。
-
-当前实现已经按这个边界处理。
+当前没有“Wayland 下 OSK0 缺失/调用失败”的实机测试环境。代码已按 DBus 返回结果实现回退并保留 TODO 注释；未来具备环境后，需要验证系统键盘与旧键盘不会同时显示、主窗口全屏状态正确恢复，以及字段切换和对话框关闭时键盘能正常收口。
 
 ### 11.3 带单位的数值输入不要直接改成这套普通文本键盘逻辑
 
@@ -302,3 +308,9 @@ grim /tmp/sgstudio-osk.png
 - 树莓派具体回退：`sm.puri.OSK0.SetVisible(true/false)`
 
 今后新增 Wayland 文本输入框时，优先复用这条共享路径，而不是在每个业务对话框里重新发明一套系统键盘控制逻辑。
+
+## 13. x86_64 physical-input policy
+
+As of 2026-08-28, x86_64 is treated as a physical keyboard-and-mouse product. `Controls::Keyboard::showPopup()` is intentionally inert on x86_64, independent of whether Qt uses xcb/X11 or Wayland. IP, port, file-name, and generic text fields must retain ordinary `QLineEdit` mouse and physical-keyboard behavior and must not depend on the legacy application keyboard.
+
+This policy overrides older statements in this document that described the X11 legacy-keyboard fallback as applying to every Linux architecture. The Wayland system-keyboard request and legacy fallback remain an embedded non-x86_64 policy, currently used by Linux aarch64. SCPI ports are a separate aarch64 numeric-input case and use `TouchNumKeyboard` on both xcb/X11 and Wayland.

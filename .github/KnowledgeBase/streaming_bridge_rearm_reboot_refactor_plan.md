@@ -183,8 +183,8 @@ flowchart LR
 ```text
 device_config_clock
  -> tx_config_ffm
- -> channel_config_trigger
- -> tx_config_stream
+ -> tx_config_stream(stream0, setting, source/response_count)
+ -> channel_config_trigger(stream0, action)
  -> tx_config_output
  -> channel_start
  -> channel_trigger_bus
@@ -204,8 +204,8 @@ device_config_clock
 configuration(mode=STREAM)
  -> clock
  -> ffm
- -> trigger
- -> tx_config_stream
+ -> tx_config_stream(stream0, setting, source/response_count)
+ -> channel_config_trigger(stream0, action)
  -> output
  -> start
  -> trigger_bus
@@ -216,8 +216,8 @@ configuration(mode=STREAM)
 ```text
 startStreamingFrequencySweep / startStreamingLevelSweep
  -> tx_config_fscan / tx_config_lscan
- -> channel_config_trigger(action=SWEEP, count=-1)
- -> tx_config_stream
+ -> tx_config_stream(stream0, setting, source/response_count)
+ -> channel_config_trigger(stream0, action=SWEEP)
  -> tx_config_output
  -> channel_start
  -> channel_trigger_bus
