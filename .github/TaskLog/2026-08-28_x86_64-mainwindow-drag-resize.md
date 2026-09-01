@@ -2,7 +2,7 @@
 
 - 日期：2026-08-28
 - 范围：仅 Linux x86_64（`scripts/build.sh` 的 `ubuntu-x86_64` / `gcc` 目标）
-- 验证级别：static（本方案只做静态分析与设计，不含编译/运行验证）
+- 验证级别：static（本次实现只做静态验证，不含编译/运行验证）
 - 相关 KnowledgeBase：
   - `linux_x86_64_x11_and_future_labwc_wayland.md`
   - `mainwindow_panel_minimum_height_wayland_contract.md`
@@ -159,3 +159,14 @@ Windows、aarch64 Raspberry Pi / RK3588 三条路径的编译产物与运行行�
 6. 进入 MiniBar 再 Restore，窗口回到进入前的尺寸与最大化状态。
 7. 退出后重启，`restoreGeometry()` 恢复上次尺寸与位置。
 8. 交叉验证：aarch64 Raspberry Pi 与 RK3588 包仍为全屏、无最大化/最小化按钮；Windows 行为无变化。
+
+## 6. 实施记录
+
+2026-08-28 已按本方案落地：
+
+- 新增 `mainwindowchrome_x11.{h,cpp}`，只在 `Q_OS_LINUX && Q_PROCESSOR_X86_64` 下编译有效代码。
+- 标题栏空白区使用 `QWindow::startSystemMove()`，四边和四角使用 `QWindow::startSystemResize()`。
+- 边缘命中宽度为 6 逻辑像素，最小尺寸为 `1280x800`，最大化/全屏状态禁用边缘缩放。
+- 应用级过滤器先按 `widget->window() == m_window` 限定在主窗口子树，并为已有及后续加入的子控件启用 mouse tracking，以保证无按键 `MouseMove` 可以更新边缘光标。
+- `MainWindow::changeEvent()` 在 x86_64 Linux 下同步最大化图标，`TitleBar` 在该平台显示最大化/最小化按钮。
+- CMake 已纳入新文件；`git diff --check` 通过。按仓库默认规则未编译或运行，真机交互验收仍按第 5 节执行。

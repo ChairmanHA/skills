@@ -132,6 +132,13 @@ Qt Creator 用户的默认行为仍然应该是：
 
 因为启动代码会按可执行文件相对路径去查找 `../plugin`、`../configuration`，所以 Qt Creator 只要保持 `build-tree` 默认语义，运行时资源就应该和当前 build tree 绑定，而不是默认回到 repo-root。
 
+Linux Qt 平台插件需要单独区分开发与打包布局：
+
+- 如果可执行文件相邻 `platforms/` 中存在 xcb 或 Wayland 插件，启动代码按打包布局隔离到相邻 Qt 插件目录。
+- Qt Creator build-tree 默认不复制 Qt 平台插件；`src/app/CMakeLists.txt` 在 configure 时通过当前 Kit/qmake 的 `QT_INSTALL_PLUGINS` 查询同源插件根，作为 build-tree fallback 编译进应用。
+- 不要把 `/opt/Qt/...` 硬编码进 `main.cpp`，也不要只依赖 `QLibraryInfo::PluginsPath`；可重定位 Qt 安装可能保留历史部署前缀，而 qmake query 才是当前 Kit 的权威路径。
+- build-tree fallback 只在相邻包内插件不存在且调用方没有显式提供插件环境时生效，不改变正式归档的包内运行时隔离。
+
 如果你要为 Qt Creator 新增任何 helper target 或自动清理逻辑，必须先回答两个问题：
 
 1. 它会不会在没有源码变化的 Run 前检查里仍然执行？

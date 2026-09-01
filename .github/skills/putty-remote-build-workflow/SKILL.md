@@ -34,6 +34,7 @@ user-invocable: true
 2. 先做最小远端探活。
    - 用一条命令确认能登录、能执行远端 shell、主机名和系统信息可读。
    - 不要上来就跑大段安装脚本。
+   - 如果目标是本机 VMware 来宾，先执行 `vmrun list` 和 `vmrun getGuestIPAddress <vmx> -wait` 发现当前入口，不要把来宾曾经配置过的静态 IP 直接当成可达事实。
 
 3. 用一条紧凑命令收集远端开发环境事实。
    - 操作系统版本。
@@ -70,6 +71,12 @@ user-invocable: true
 - 如果只是确认环境是否打通，优先做到“可配置 + 已进入正常编译”，不必每次都等整仓编译结束。
 
 ## Common Failure Modes
+
+- TCP 22 能连接，但 SSH 在 banner 或密码提示前立即关闭：
+  - 先检查 `Test-NetConnection -InformationLevel Detailed` 的 `SourceAddress`。如果来源是 Clash/TUN 一类虚拟地址，TCP accept 可能是代理假响应，不能证明来宾 SSH 可达。
+  - 对本机 VMware 来宾，用 `vmrun getGuestIPAddress <vmx> -wait` 取得 VMware Tools 报告的当前地址，并核对 Windows 上对应 VMnet 适配器与路由。
+  - 如果来宾有多块网卡，用 VMX 的 `ethernetN.connectionType` 和 `generatedAddress` 对照来宾 `ifconfig` / `ip address` 的 MAC。`UP/RUNNING` 只证明虚拟网卡已启用，不证明桥接后的物理网络或该 IP 子网可达。
+  - NAT 网卡适合主机稳定访问来宾；bridged 网卡只有在桥接到有效物理适配器、且来宾 IP 属于该物理网络子网时才作为入口。
 
 - `$plink` 未识别：
   - 原因：在当前工具环境里，`$plink = '...'; & $plink ...` 这种模式不够稳。
@@ -115,6 +122,21 @@ user-invocable: true
 - 需要密码登录时，在当前终端会话通过环境变量、Pageant/SSH key 或 Git credential helper 注入。
 - 非交互 `git pull` 需要 Git HTTP 密码时，优先使用一次性 `GIT_ASKPASS` 临时脚本，命令结束后立刻删除。
 - 具体模板见 [PowerShell / plink snippets](./references/powershell-plink-snippets.md) 的 SGStudio verified profile 小节。
+
+## Verified Local VMware Profile
+
+2026-08-31 已验证的本机 Ubuntu 18.04 来宾入口：
+
+- VMX: `D:\development\Ubuntu18.04\Ubuntu18.04.vmx`
+- SSH user: `harogic`
+- Project path: `~/Desktop/sgstudio`
+- `ethernet0` / 来宾 `ens33`: VMware NAT，MAC `00:0c:29:2d:21:20`
+- `ethernet1` / 来宾 `ens37`: bridged，MAC `00:0c:29:2d:21:2a`
+- 主机优先通过 NAT 地址访问；用 `vmrun -T ws getGuestIPAddress <vmx> -wait` 动态发现，不把某次 DHCP 地址写成固定入口。
+- 当前 bridged 地址 `192.168.1.22/24` 不能作为可靠入口：主机活动 WLAN 位于 `192.168.3.0/24`，且主机物理以太网断开。若要启用 bridged 入口，应由用户决定后，把 VMware 桥接目标固定到活动物理适配器，并让来宾从该物理网络获取同子网地址。
+- VMware Guest Operations 与 SSH 都必须使用真实来宾用户名；不要根据口述账号盲猜，必要时从已登录终端提示符核对。
+
+不要在排障时添加宽泛或永久主机路由。若为验证添加单主机临时路由，先确认下一跳确实能路由到目标网段，并在失败或任务结束后删除。
 
 ## Expected Output
 
