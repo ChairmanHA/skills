@@ -800,17 +800,15 @@ $$
 #### packing 层硬约束
 
 - `SampleRate`：按当前设备 Playback domain 回写；空洞输入优先向下落到连续低档，精确 400 MHz 才保留离散点
-- 当 `Left + Right > FFTSize` 时：
-  - `Left = FFTSize / 2`
-  - `Right = FFTSize / 2`
+- `GardBandCarriers_Left` / `GardBandCarriers_Right`：整数，`0 ~ floor(FFTSize / 2) - 1`
 - `symbolCount`: 2 ~ 16384
 - `GuardInterval`: 0 ~ 100
 - `windowLength`: 0 ~ 100
 
 #### 当前实现注意
 
-- 当前约束是“若左右保护子载波之和过大，则各回写为 FFTSize 的一半”。
-- 这会使 `Left + Right = FFTSize`，并非严格小于 `FFTSize`。
+- 左右保护子载波按每侧独立钳位；支持的 FFTSize 均为偶数，因此两侧最大值同时取满时 `Left + Right = FFTSize - 2`。
+- 默认 `NullDC = true` 时，上述约束仍至少保留 1 个非保护、非 DC 子载波，避免 guard band 与 DC null 把资源网格挤空。
 - business 同时校验 `FFTSize` 必须为 16~2048 的 2 次幂；异常输入回写默认 64。
 - business 根据当前 `maxWaveformBytes` 计算最大 `symbolCount`，超限时优先降低并永久回写 `symbolCount`。
 

@@ -252,7 +252,7 @@ QPA 与 loader 是两个不同边界：`DT_RPATH` 解决 ELF 间接库，应用�
 | :--- | :--- | :--- |
 | `standard cn/en` | `SGStudio` | `SGStudio` |
 | `standard ru` | `СПО ГСРВ` | `SGStudio` |
-| `neutral *` | `VSG` | `SGStudio` |
+| `neutral *` | `VSG` | `VSG` |
 | `BNC en` | `VectorCore` | `VectorCore` |
 
 两个脚本每次都清空自己的 build tree。显式 `--watermark off` 会在 staging 中

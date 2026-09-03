@@ -69,8 +69,9 @@ scripts/build_pi.sh aarch64 BNC en --watermark off
 ```
 
 When no archive name is supplied, all three entries default to `VectorCore`.
-The Windows `build_all.bat` matrix also includes `BNC en`. Raspberry Pi BNC
-packages contain `launch_pi.sh`, rendered during packaging to launch only
+The Windows `build_all.bat` matrix intentionally excludes `BNC en`; this special
+edition must be built explicitly only when requested. Raspberry Pi BNC packages
+contain `launch_pi.sh`, rendered during packaging to launch only
 `bin/VectorCore` relative to the package root; no SGStudio executable or install
 path fallback remains in that launcher.
 

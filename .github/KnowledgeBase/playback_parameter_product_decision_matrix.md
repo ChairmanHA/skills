@@ -248,7 +248,7 @@ OFDM属于能力已确定项，SampleRate为显式参数；其余设备差异主
 | SymbolCount | 2～min(16384, floor(125 MiB/bytesPerSymbol)) | 2～16384；当前最大FFT/GI组合也不超过1000 MiB |
 | GuardInterval | 0%～100% | 不变 |
 | WindowLength | 0%～100% | 不变 |
-| GuardBand Left/Right | 当前仅在Left+Right>FFTSize时各回写FFTSize/2，未形成严格独立范围 | 与设备无关，建议产品确认0～FFTSize-1且Left+Right≤FFTSize-1 |
+| GuardBand Left/Right | 每侧0～floor(FFTSize/2)-1，输入按整数非负回写 | 不变 |
 | NullDC | Off/On | 不变 |
 | Windowed | Off/On | 不变 |
 | Modulation Type | BPSK/QPSK/8PSK/16PSK/QAM16/QAM64/QAM256 | 不变 |
@@ -265,11 +265,11 @@ OFDM属于能力已确定项，SampleRate为显式参数；其余设备差异主
 | D4 | Pulse 6/8点、动态Period、连续档优先和125 MiB软预算方案 | 已批准：无选件档采用48/96 ns，含选件档开放30/40 ns连续档和15/20 ns 400档 | 已实现 |
 | D5 | Multitone是否在UI中明确标识“精确400 MSPS lattice” | 建议标识为离散能力 | 防止把160～320 MHz占用范围误解为连续可用 |
 | D6 | 含带宽选件设备的窄带AWGN是否允许接近1000 MiB、超过20分钟的Length | 建议增加产品软上限，保留1000 MiB硬能力 | 控制生成等待和用户误操作 |
-| D7 | OFDM GuardBand是否改成严格0～FFTSize-1且总和≤FFTSize-1 | 建议确认并修正 | 这是现有参数定义缺口，与设备型号无关 |
+| D7 | OFDM GuardBand是否改成严格范围 | 已采用每侧0～floor(FFTSize/2)-1 | 这是现有参数定义缺口，与设备型号无关 |
 
 ## 7. 决策后的实施顺序
 
-1. 先确认D1～D7，并把确认结果写回本文。
+1. 后续继续确认D1～D6，并把确认结果写回本文。
 2. 优先实现Pulse动态范围，因为当前显示范围与有效波形之间存在明确矛盾。
 3. 对AM/FM/PM只按产品确认调整business有效范围；PropertyMetadata仍保持简单。
 4. Digital/DSSS/OFDM、Ramp/AWGN、Multitone和ARB以本文“能力已确定”表作为含带宽选件档验收矩阵。

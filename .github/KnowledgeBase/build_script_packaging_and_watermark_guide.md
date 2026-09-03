@@ -18,7 +18,7 @@ Linux target、环境差异与启动方式见
 用法：
 
 ```bat
-scripts\build.bat <packet> <language> [archive_name] [--rebuild] [--watermark on|off]
+scripts\build.bat <packet> <language> [archive_name] [options]
 ```
 
 示例：
@@ -27,6 +27,7 @@ scripts\build.bat <packet> <language> [archive_name] [--rebuild] [--watermark on
 scripts\build.bat standard cn SGStudio --rebuild --watermark off
 scripts\build.bat standard en SGStudio --watermark on
 scripts\build.bat neutral en --without-watermark
+scripts\build.bat standard en --startup-eth-connect-dialog on --analog-plugin off --scpi-plugin off
 ```
 
 特点：
@@ -35,6 +36,44 @@ scripts\build.bat neutral en --without-watermark
 - 默认增量构建；`--rebuild` 删除该 build tree 后重新 configure；
 - 递归 staging `QuickWaveFormData/`，并预创建运行时 `images/`；
 - 输出：`build/windows_x86_64/<packet>/<language>/<archive_name>.zip`。
+
+### 2.1 Windows 单包 CMake 选项接口
+
+| 脚本参数 | CMake 选项 | 源码默认值 |
+| :--- | :--- | :--- |
+| `--watermark on|off` | `SGS_ENABLE_INTERNAL_WATERMARK` | `OFF` |
+| `--startup-eth-connect-dialog on|off` | `SGS_ENABLE_STARTUP_ETH_CONNECT_DIALOG` | `OFF` |
+| `--analog-plugin on|off` | `SGS_ENABLE_ANALOG_PLUGIN` | `ON` |
+| `--scpi-plugin on|off` | `SGS_ENABLE_SCPI_PLUGIN` | `ON` |
+
+四个接口都不区分大小写。可以在同一次单包构建中组合使用，例如：
+
+```bat
+scripts\build.bat standard cn SGStudio --rebuild ^
+  --watermark off ^
+  --startup-eth-connect-dialog off ^
+  --analog-plugin on ^
+  --scpi-plugin on
+```
+
+未传入某个选项时，`build.bat` 不强制写入对应的 `-D` 参数：新 build tree
+采用源码默认值，已有增量 build tree 可以保留 CMake cache 中的值。正式构建若要求
+确定配置，应显式传入需要固定的开关，或配合 `--rebuild` 使用。
+
+### 2.2 Windows 最终常规发布矩阵
+
+最终常规发布使用：
+
+```bat
+scripts\build_all.bat --watermark off
+```
+
+该入口依次对 `standard cn/en/ru` 与 `neutral cn/en` 做全量重建。BNC/VectorCore
+是按需构建的特殊版本，不在 `build_all.bat` 矩阵中；需要时单独调用
+`scripts\build.bat BNC en --rebuild --watermark off`。
+
+不传入全局 archive name 时，standard 三种语言生成 `SGStudio.zip`，neutral
+两种语言生成 `VSG.zip`。
 
 ## 3. `build.sh`：250 Linux 三目标
 
@@ -138,7 +177,7 @@ cd /path/to/<archive_name>
 | :--- | :--- | :--- |
 | `standard cn/en` | `SGStudio` | `SGStudio` |
 | `standard ru` | `СПО ГСРВ` | `SGStudio` |
-| `neutral *` | `VSG` | `SGStudio` |
+| `neutral *` | `VSG` | `VSG` |
 | `BNC en` | `VectorCore` | `VectorCore` |
 
 ## 6. 水印开关

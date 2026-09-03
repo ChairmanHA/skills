@@ -24,7 +24,7 @@
 | [scpi_review_and_integration_plan.md](scpi_review_and_integration_plan.md) | SCPI 接入边界审阅与当前收口方案：说明为什么现有 TX apply/writeback 足够支撑 CW 类 UI 同步，记录已修 P0 后仍存在的 metadata、UI 自动化、错误/完成语义、安全配置、参数校验和第三方 vendoring 卫生问题，并给出向 `ScpiIntentService` 迁移的阶段路径。 |
 | [htra_h2_api_v2_0_usage.md](htra_h2_api_v2_0_usage.md) | HTRA H2 API v2.0 设备能力参考：覆盖 CW/Playback/Stream/MSCAN/GNSS 及推荐调用顺序；当前主要用于理解设备层语义，以及 `Streaming` / `MSCAN` / `Arb` 等剩余特殊路径。 |
 | [streaming_dataflow.md](streaming_dataflow.md) | `Streaming` 当前独立 legacy 路径的“双线程 + 队列”总览：UI/Property/Business/Device 的交互、中断、重启与数据发送语义。 |
-| [streaming_bridge_rearm_reboot_refactor_plan.md](streaming_bridge_rearm_reboot_refactor_plan.md) | `Streaming` 当前桥接实现与下一步重构基线：总结 `FixedStream / SweepStream` 如何桥接到 `StreamingBussiness`，以及运行期参数如何区分为在线热切、RearmSession、HardReboot 与 Pipeline 切换。 |
+| [streaming_bridge_rearm_reboot_refactor_plan.md](streaming_bridge_rearm_reboot_refactor_plan.md) | `Streaming` 当前桥接与双通道重构基线：覆盖长生命周期 session、endpoint 路由和重配分层；短期目标为 Level 1 Dual RF Channel——两个 RF/vector channel 共享单路 USB/ETH realtime ingress，Streaming 期间 peer mutation 需 quiesce；同时记录 transport-specific capability、H2 API 契约、硬件分区及未来 Level 2 双流边界。 |
 | [device_discovery_architecture.md](device_discovery_architecture.md) | 设备发现/枚举架构与职责边界。 |
 | [multi_instance_usb_ownership_and_startup_gate.md](multi_instance_usb_ownership_and_startup_gate.md) | 当前多实例 USB owner / startup gate 的真实实现说明：覆盖 `InstanceStateRegistry`、startup free USB 选择、runtime auto-attach 经 profile coordinator 恢复目标 UID、手工 ETH 边界，以及仍未收口到设计的几个实现差异。 |
 | [device_open_ui_config_flow.md](device_open_ui_config_flow.md) | 设备切换 → UI 更新 → orchestrator / runtime / legacy business 驱动配置的完整调用链与已知坑位。 |
