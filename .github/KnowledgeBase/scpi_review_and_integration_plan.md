@@ -44,40 +44,8 @@ SCPI 基础设施本身方向是合理的：
 
 ## 当前仍存在的问题
 
-### 1. `scpi.json` 元数据和运行时依赖仍不准确
 
-观察：
-
-```json
-{
-    "Name": "SCPI",
-    "Dependencies": [ "Core"],
-    "Description": "The SCPI plugin for SAStudio4."
-}
-```
-
-当前命令实现访问了：
-
-- `BusinessManager::getBusinessByName(...)`
-- Analog / HTRA / QuickWaveform 业务和 Property
-- `MainWindow`
-- `CommonPanel`
-- `StepSweepPanel`
-- `DeviceSettingPanel`
-
-风险：
-
-- metadata 只声明依赖 `Core`，但命令面实际假设多个业务插件已经注册完成。
-- 描述仍是 SAStudio4，和当前产品不一致。
-- 依赖不准确会让插件加载顺序、功能可用性和问题定位变得偶然。
-
-建议：
-
-- 把描述改为 SGStudio。
-- 二选一：收窄命令面到真实 Core-only，或声明当前命令面真正依赖的业务插件。
-- 如果保留完整命令面，至少在文档中明确这些命令的插件依赖和不可用时的错误返回。
-
-### 2. SCPI 命令仍依赖 UI 对象和可见主窗口
+### 1. SCPI 命令仍依赖 UI 对象和可见主窗口
 
 观察：
 
@@ -98,7 +66,7 @@ SCPI 基础设施本身方向是合理的：
 - 中期把 Common、Sweep、调制业务逐步迁移到 UI 无关 intent/service。
 - 当前保留 UI 触发路径时，必须在 SCPI 手册中写清楚“UI 必须存在”。
 
-### 3. 命令错误没有进入 SCPI 错误队列
+### 2. 命令错误没有进入 SCPI 错误队列
 
 观察：
 
@@ -118,7 +86,7 @@ SCPI 基础设施本身方向是合理的：
 - 至少区分：无设备、功能不可用、参数非法/越界、状态冲突、内部错误。
 - 所有命令失败路径先推错误，再返回 `SCPI_RES_ERR` 或等价失败结果。
 
-### 4. `*OPC?` / `*WAI` 没有真实完成语义
+### 3. `*OPC?` / `*WAI` 没有真实完成语义
 
 观察：
 
@@ -138,24 +106,7 @@ SCPI 基础设施本身方向是合理的：
 - 长期把 `*OPC?` / `*WAI` 接到 `TxSessionService` 的 apply 完成状态，例如 `appliedStateChanged`、`deviceConfigurationDone`、`sweepConfigurationDone`。
 - 推荐长期语义：set 命令入队后可快速返回，`*OPC?` / `*WAI` 等待 apply 队列空闲并能读取最近一次 apply 结果。
 
-### 5. parser 中固定 `QThread::msleep(100)`
-
-观察：
-
-`src/libs/scpi/src/parser/parser.cpp` 在命令处理循环里固定 sleep 100 ms。
-
-风险：
-
-- 吞吐被硬限制到大约 10 cmd/s。
-- 这个 sleep 不能替代真正的 apply 完成同步。
-- 它可能掩盖时序问题，同时拖慢正常自动化。
-
-建议：
-
-- 在完成语义明确前，不要把 sleep 当作同步机制。
-- 建议在接入真正的 command/apply 状态后删除。
-
-### 6. `*RST` 可能被 UI modal 阻塞
+### 4. `*RST` 可能被 UI modal 阻塞
 
 观察：
 
@@ -171,7 +122,7 @@ SCPI 基础设施本身方向是合理的：
 - 为 SCPI 提供不弹窗的 preset/reset intent。
 - 或把 `*RST` 明确标注为 UI 交互命令，不推荐自动化使用。
 
-### 7. TCP 绑定地址和安全策略不明确
+### 5. TCP 绑定地址和安全策略不明确
 
 观察：
 
@@ -188,7 +139,7 @@ SCPI 基础设施本身方向是合理的：
 - 如果产品定位就是网口仪器，保留 `Any` 也可以，但 UI 和文档必须明确“已对局域网开放且无鉴权”。
 - 后续可增加 bind address 配置和持久化。
 
-### 8. 端口配置未持久化，数据通道策略不清晰
+### 6. 端口配置未持久化，数据通道策略不清晰
 
 观察：
 
@@ -207,7 +158,7 @@ SCPI 基础设施本身方向是合理的：
 - TCP/data 端口都走 `Utils::Settings` 持久化，并做范围和冲突校验。
 - 明确 data channel 是可选通道还是必需通道；若可选，应在 UI 显示 degraded 状态。
 
-### 9. 参数越界被全局 `NumericProperty` clamp 掩盖
+### 7. 参数越界被全局 `NumericProperty` clamp 掩盖
 
 观察：
 
@@ -225,7 +176,7 @@ SCPI 基础设施本身方向是合理的：
 - 越界直接推 `-222 Data out of range` 或项目定义的等价错误。
 - 全局 clamp 是否保留应作为 UI/Property 行为单独评审，不应作为 SCPI validation 策略。
 
-### 10. 业务查找依赖显示名
+### 8. 业务查找依赖显示名
 
 观察：
 
@@ -241,7 +192,7 @@ SCPI 基础设施本身方向是合理的：
 - 给业务引入稳定 ID。
 - SCPI 使用稳定 ID 或业务注册表，不使用显示名。
 
-### 11. 第三方 parser vendoring 较宽，但不是当前功能阻塞项
+### 9. 第三方 parser vendoring 较宽，但不是当前功能阻塞项
 
 观察：
 

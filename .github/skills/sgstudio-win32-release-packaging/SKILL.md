@@ -13,8 +13,9 @@ description: 'Use only for final Win32 Release packaging of the five ordinary SG
 - Never include `BNC en` / VectorCore. It is a special edition with an explicit,
   separate build entry.
 - Always produce the formal no-watermark configuration.
-- Keep the default product package names: all standard archives are `SGStudio`;
-  all neutral archives are `VSG`.
+- Keep the default product package names: Standard CN/EN archives are
+  `SGStudio`, Standard RU is `SGStudio_russia`, and all neutral archives are
+  `VSG`.
 
 ## Execute
 

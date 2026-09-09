@@ -22,7 +22,7 @@ $russianProductName = -join (@(
 $matrix = @(
     [pscustomobject]@{ Label = 'standard cn'; Packet = 'standard'; Language = 'cn'; Archive = 'SGStudio'; Executable = 'SGStudio.exe' },
     [pscustomobject]@{ Label = 'standard en'; Packet = 'standard'; Language = 'en'; Archive = 'SGStudio'; Executable = 'SGStudio.exe' },
-    [pscustomobject]@{ Label = 'standard ru'; Packet = 'standard'; Language = 'ru'; Archive = 'SGStudio'; Executable = "$russianProductName.exe" },
+    [pscustomobject]@{ Label = 'standard ru'; Packet = 'standard'; Language = 'ru'; Archive = 'SGStudio_russia'; Executable = "$russianProductName.exe" },
     [pscustomobject]@{ Label = 'neutral cn'; Packet = 'neutral'; Language = 'cn'; Archive = 'VSG'; Executable = 'VSG.exe' },
     [pscustomobject]@{ Label = 'neutral en'; Packet = 'neutral'; Language = 'en'; Archive = 'VSG'; Executable = 'VSG.exe' }
 )

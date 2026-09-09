@@ -95,6 +95,73 @@ Wayland 问题关注的是：Qt 算出的最小尺寸本身是否已经超过固
 
 当业务页面把 Qt 顶层最小高度抬到 `805px` 时，目标输出仍只有 `800px`。不能依赖 compositor 提供额外空间，也不能用 Windows 的 `ptMinTrackSize` 路径解决。
 
+### 延迟 show、非零临时几何与 Qt 运行时构成差异（已验证坑位）
+
+核心问题是：启动画面延后了 `MainWindow::showFullScreen()`，但
+`QTimer::singleShot(0, ...)` 响应式更新仍在事件循环中提前执行：
+
+```text
+隐藏 MainWindow 已 resize(1280, 800)
+    -> 子控件仍是约 431px 的非零临时宽度
+    -> 响应式规则误切到 125px Compact 布局
+    -> MainWindow minimumSizeHint 被抬到约 979 x 830
+    -> 稍后才 showFullScreen()
+```
+
+`resize()` 隐藏顶层窗口不代表后代控件已经获得最终几何；非零也不代表有效。
+`singleShot(0)` 只保证下一轮事件循环执行，不保证晚于首次 show 或 Wayland
+configure。
+
+### 发行版 Qt 与自带标准 Qt 的风险
+
+本次差异不能归纳成“Qt 5.15.8 比 5.15.18 更兼容”。223 上的 QtCreator 工程
+携带库与 Debian 系统 Qt 5.15.8 完全相同；打包程序使用另一套 Qt 5.15.18。
+两个实际 `libQt5WaylandClient` 的反汇编确认：
+
+```text
+Debian QtWayland 5.15.8-2:
+    initWindow()
+    setGeometry(windowGeometry())
+
+随包 QtWayland 5.15.18:
+    initWindow()
+    mDisplay->flushRequests()
+    setGeometry(windowGeometry())
+```
+
+Debian `5.15.8-2` 回移了 Qt 修复
+[`46ed85a80b28d519cf5887bbdce55d1bf57886c3`](https://github.com/qt/qtwayland/commit/46ed85a80b28d519cf5887bbdce55d1bf57886c3)，
+用于避免 show 期间同步分发 Wayland 事件造成客户端重入。Debian 的
+[`qtwayland-opensource-src 5.15.8-2` 补丁序列](https://sources.debian.org/patches/qtwayland-opensource-src/5.15.8-2/)
+包含该补丁，而随包 Qt 5.15.18 仍有 `flushRequests()`。因此，使用标准 Qt 编译并
+随包发布到 Debian 时，可能丢失 Debian 为其桌面和用户空间组合回移或附加的修复；
+即使 Qt 版本号更高，运行行为也可能倒退。比较时必须记录发行版修订号、补丁集和
+编译来源，不能只比较 `qVersion()`。
+
+对 SGStudio 当前 AArch64 Wayland 发布链，风险评为 **高**：
+
+- **发生概率：中高。** 自带 Qt 与目标系统 Qt 已确认存在关键补丁差异，且项目使用
+  fullscreen、启动画面和响应式布局等时序敏感路径。
+- **影响：高。** 问题只在目标桌面运行时出现，编译和普通依赖检查均可通过，容易
+  进入发布包并形成状态栏裁切、窗口几何、输入法或弹窗等现场问题。
+- **范围：有条件。** 风险集中在 Qt 的平台集成层，例如 Wayland QPA、窗口管理、
+  输入法、触摸和图形栈；纯业务逻辑不因缺少发行版 Qt 补丁而自动变成高风险。
+
+这里已验证“补丁差异存在且路径吻合”；若要证明该补丁是本现象的唯一变量，仍需对
+同一 Qt 构建只切换该补丁做 A/B 测试。
+
+修复原则不是强制压缩真实 minimum，而是只在几何输入有效时执行响应式判断：
+
+```cpp
+if (!isVisible()) {
+    return;
+}
+```
+
+首次 `showFullScreen()` 后必须再调度一次响应式更新，使布局使用已经显示的窗口
+几何。若将来启动流程再次变化，更严格的有效边界可以是首次 show/configure 后的
+resize 事件；不能把“非零”继续当成“最终几何已就绪”。
+
 两者的共同原则是“尊重真实业务最小尺寸”，但检查方向相反：
 
 - Windows：防止 native window 小于 Qt minimum。
@@ -159,6 +226,10 @@ MainWindow effective minimum    <= 800
   - stacked layout 每个页面的 minimumSizeHint。
 - 对比 QWidget 顶层几何与 Wayland 输出几何；若 QWidget 大于 surface，优先定位是哪一个 panel 抬高了 minimum。
 - 切换到其他页面后仍要检查，因为根因可能来自不可见页面。
+- 带启动画面或其他延迟 show 路径时，记录响应式回调发生时顶层窗口是否可见；
+  隐藏子控件的非零 width/height 不能当作最终布局输入。
+- 同一代码分别记录实际加载的 Qt Core/Gui/Widgets、QPA 和 shell-integration
+  版本；QtCreator 正常只能证明对应 kit 的运行时正常，不能替代打包运行时验收。
 
 ## 6. 修复优先级
 
@@ -178,4 +249,3 @@ MainWindow effective minimum    <= 800
 - `src/plugins/core/mainwindowchrome_win.cpp`
 - [MainWindow Frameless Minimum Size Contract（Windows）](mainwindow_frameless_minimum_size_contract.md)
 - [FancyTabWidget 调制列表响应式布局设计](fancytabwidget_modulation_list_responsive_layout.md)
-

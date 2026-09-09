@@ -1,133 +1,189 @@
-# Knowledge Base Index
+# SGStudio 知识库索引
+本页是文档清单与检索入口；执行规则见项目 AGENTS.md / 共享 copilot-instructions.md。
 
-## Recent Additions
+## 快速定位
 
-| Document | Description |
-| :--- | :--- |
-| [linux_build_package_unified_entry.md](linux_build_package_unified_entry.md) | Linux 两入口构建模型：250 的 `raspberry-pi` profile 生成 Raspberry Pi Wayland + RK3588 X11 共用归档并直接运行 `bin/<application>`；108 保留 `build_pi.sh` 原生防火墙。 |
-| [raspberry_pi_132_build_host_250_compatibility.md](raspberry_pi_132_build_host_250_compatibility.md) | 250 AArch64 交叉构建与 108/RK3588 双目标的兼容依据：覆盖旧 ABI 门禁、闭源库窄例外、Qt/LayerShellQt 隔离、Wayland/xcb 自动选择和直接启动合同。 |
-| [linux_x86_64_x11_and_future_labwc_wayland.md](linux_x86_64_x11_and_future_labwc_wayland.md) | Linux x86_64 当前固定 X11/xcb 的构建与启动边界，以及未来以独立 artifact 恢复 labwc/wlroots Wayland、LayerShellQt、Qt private ABI、运行时打包和 UI 验收的迁移步骤。 |
-| [scpi_review_and_integration_plan.md](scpi_review_and_integration_plan.md) | SCPI 当前 TX/runtime/UI 回写依据、必须立即修正的问题，以及从 UI 自动化式 SCPI 迁移到窄 SCPI intent service 的阶段方案。 |
-| [minibar_wayland_layershell_debug_guide.md](minibar_wayland_layershell_debug_guide.md) | Minibar 在 Raspberry Pi Wayland 使用 LayerShellQt 的长期 Debug 总入口：统一 surface/host/input/geometry/focus/lifetime 模型，汇总 helper 当前实现与已删除 in-process 路径的历史证据、失败回退、取证流程和双平台回归矩阵。 |
-| [minibar_helper_layershell_parity_gaps.md](minibar_helper_layershell_parity_gaps.md) | `SGStudioMiniBar` 的 Wayland base surface、managed keyboard、Sweep/MOD/menu overlay 与 Win32/Wayland 平台分流现状；记录 enum popup 首次映射前配置、ownership、outside-click 和单调时间 close guard。 |
-| [minibar_cs_helper_scpi_architecture.md](minibar_cs_helper_scpi_architecture.md) | 双进程 minibar 唯一产品架构：main 独占设备/runtime，helper 使用 typed snapshot/request、乐观 UI intent 与差分回写接入 RF/Center/Level/Sweep/MOD；同时定义隐藏 MainWindow 期间的 prompt suppression、结构化错误反馈与“不转发 MessageDialog”边界。 |
+先读本页前 35 行，按任务选一个分区，再读该区最相关的 1–2 篇。跨域问题按实际依赖补读；无需顺序通读目录或全库。分区内标有“入口”的文档适合先建立背景，已知具体问题可直接选专题。
 
-本文档是 `.github/KnowledgeBase/` 的索引（以本仓库实际存在的文件为准）。
+| 任务 / 搜索词 | 分区 |
+| --- | --- |
+| TX、RF/MOD、runtime、provider、插件加载、退出死锁 | [A-runtime](#a-runtime) |
+| 设备发现、切换、USB/ETH、UID、多实例、时钟、Trigger、许可证 | [B-device](#b-device) |
+| Playback、ARB、WAV/IQS、采样率、带宽、容量、大波形 | [C-playback](#c-playback) |
+| AM/FM/Ramp、Multitone、RMS、Digital/16QAM、频谱仪验证 | [D-waveform](#d-waveform) |
+| SCPI、程序级远程控制、命令接入、ListMode 命令兼容 | [E-scpi](#e-scpi) |
+| Sweep/FScan、扫描业务、CW 模式切换、预校验 | [F-sweep](#f-sweep) |
+| Minibar、helper、typed IPC、LayerShellQt、浮窗 | [G-minibar](#g-minibar) |
+| MainWindow、QSS、LabelButton、DPI、多屏、布局、Wayland 全屏、延迟 show、消息弹窗 | [H-ui](#h-ui) |
+| 软键盘、单位/步长、焦点、重复绑定、QSettings、路径误判 | [I-input-pitfalls](#i-input-pitfalls) |
+| CMake、Debug/Release、运行目录、Windows DLL、stage、品牌打包 | [J-build-windows](#j-build-windows) |
+| Linux、树莓派、RK3588、250/108、ABI、X11/Wayland、VMware | [K-linux](#k-linux) |
+| Updater、固件、maintenance、更新包、共享机箱 A/B | [L-updater](#l-updater) |
+| 版本日志、Git、分支/标签、TaskLog、prompt、协作 | [M-collaboration](#m-collaboration) |
 
-## 核心架构与生命周期
+按需读取（PowerShell；后续命令复用 `$kb`）：
 
-当前主业务架构已收敛到 `TxApplyRequest -> TxPipelineRuntime` 的 core-managed 模型，并进一步把共享发射 owner 下沉到 `TxSessionService`。主进程只创建 `MainWindow`；minibar 由独立 `SGStudioMiniBar` helper 通过 typed IPC 接入同一套 main owner，legacy in-process UI 已删除。`MSCAN` 代码链路虽然已经并入统一 request/runtime 设计，但当前 UI 入口仍因设备联调未完成而暂时隐藏。现阶段真正仍保持特殊路径的主要是 `Streaming` 与尚未接入 runtime 的 `ProgrammedArb`；Ordinary/IQS ARB 已进入统一 Playback request/runtime。
+```powershell
+$kb = 'D:\development\skills\.github\KnowledgeBase'
+Get-Content -Encoding UTF8 -LiteralPath "$kb\Index.md" -TotalCount 35
+rg -n -A 20 '^## E-scpi$' "$kb\Index.md" # 换成所选分区；读取标题及后 20 行
+rg -n '^#{1,3} ' "$kb\listmode_scpi调试指南.md" # 先定位目标文档章节
+Get-Content -Encoding UTF8 -LiteralPath "$kb\listmode_scpi调试指南.md" | Select-Object -Skip 20 -First 40 # 按命中行号调整
+```
 
-| 文档 | 说明 |
-| :--- | :--- |
-| [tx_execution_context_phase1_and_provider_migration.md](tx_execution_context_phase1_and_provider_migration.md) | 当前主业务架构文档：说明 `TxSessionService` 如何成为共享 resolve/build owner，`TxPipelineRuntime` 的串行异步 latest-intent 协调与 generation writeback 过滤，`TxPipelineExecutor` / core-managed / legacy-managed 的边界，以及 Playback immutable payload、同步下载释放与设备驻留复用语义；文内 in-process minibar 部分保留为历史迁移证据。 |
-| [scpi_review_and_integration_plan.md](scpi_review_and_integration_plan.md) | SCPI 接入边界审阅与当前收口方案：说明为什么现有 TX apply/writeback 足够支撑 CW 类 UI 同步，记录已修 P0 后仍存在的 metadata、UI 自动化、错误/完成语义、安全配置、参数校验和第三方 vendoring 卫生问题，并给出向 `ScpiIntentService` 迁移的阶段路径。 |
-| [htra_h2_api_v2_0_usage.md](htra_h2_api_v2_0_usage.md) | HTRA H2 API v2.0 设备能力参考：覆盖 CW/Playback/Stream/MSCAN/GNSS 及推荐调用顺序；当前主要用于理解设备层语义，以及 `Streaming` / `MSCAN` / `Arb` 等剩余特殊路径。 |
-| [streaming_dataflow.md](streaming_dataflow.md) | `Streaming` 当前独立 legacy 路径的“双线程 + 队列”总览：UI/Property/Business/Device 的交互、中断、重启与数据发送语义。 |
-| [streaming_bridge_rearm_reboot_refactor_plan.md](streaming_bridge_rearm_reboot_refactor_plan.md) | `Streaming` 当前桥接与双通道重构基线：覆盖长生命周期 session、endpoint 路由和重配分层；短期目标为 Level 1 Dual RF Channel——两个 RF/vector channel 共享单路 USB/ETH realtime ingress，Streaming 期间 peer mutation 需 quiesce；同时记录 transport-specific capability、H2 API 契约、硬件分区及未来 Level 2 双流边界。 |
-| [device_discovery_architecture.md](device_discovery_architecture.md) | 设备发现/枚举架构与职责边界。 |
-| [multi_instance_usb_ownership_and_startup_gate.md](multi_instance_usb_ownership_and_startup_gate.md) | 当前多实例 USB owner / startup gate 的真实实现说明：覆盖 `InstanceStateRegistry`、startup free USB 选择、runtime auto-attach 经 profile coordinator 恢复目标 UID、手工 ETH 边界，以及仍未收口到设计的几个实现差异。 |
-| [device_open_ui_config_flow.md](device_open_ui_config_flow.md) | 设备切换 → UI 更新 → orchestrator / runtime / legacy business 驱动配置的完整调用链与已知坑位。 |
-| [device_model_display_name_rules.md](device_model_display_name_rules.md) | `configuration/device_info.xml` 的设备型号显示规则：兼容旧的 `code -> name` 映射，并支持按 `hardwareType`、`os`、`optionCodes` 的有序条件别名，无需重新编译即可调整 UI 显示名。 |
-| [pga_runtime_realtime_status_chain.md](pga_runtime_realtime_status_chain.md) | PGA 平台状态栏新增实时链路说明：`PgaRuntimeStatusService` 平台态支路、与 `DeviceManager -> MainWindowDeviceController -> DeviceInfoWidget` 既有设备态链路的复用边界，以及 CPU 温度/电池解析与退化语义。 |
-| [ui_independent_runtime_and_minibar_design.md](ui_independent_runtime_and_minibar_design.md) | UI 无关运行时设计与 in-process minibar 迁移史：说明 `CoreRuntimeServices`、`DeviceRuntimeBridge`、`IBusinessEntryHost + BusinessManager(entry facade)`、`TxSessionService` 的保留边界，以及删除 legacy UI 后由 helper/IPC 接管的职责。 |
-| [minibar_cs_helper_scpi_architecture.md](minibar_cs_helper_scpi_architecture.md) | 双进程 minibar 的已实现边界：lifecycle、typed snapshot/request、RF/Center/Level 值/单位/步进闭环、Sweep/MOD 回写，以及 helper 不承载 MessageDialog、MainWindow 隐藏期统一抑制 popup prompt 的错误反馈策略。 |
-| [plugin_metadata_and_loading_architecture.md](plugin_metadata_and_loading_architecture.md) | Qt plugin metadata、json 字段、依赖解析与 PluginManager 加载顺序说明。 |
-| [app_shutdown_exit_flow.md](app_shutdown_exit_flow.md) | 退出/关机流程：PluginManager shutdown 两阶段与线程资源释放注意事项。 |
-| [updater_firmware_update_mechanism.md](updater_firmware_update_mechanism.md) | Updater 当前活跃实现说明：覆盖下载复用与清理、包结构、新旧 `version.json` 兼容、按设备选件精确匹配固件 Profile、updater / maintenance 交接边界，以及 Win32 外部文件占用隐患与延后处理方案。 |
-| [standard_cn_remote_manual_update_test_guide.md](standard_cn_remote_manual_update_test_guide.md) | Standard CN 在 Windows x86_64 与 Linux aarch64 上的远程手动下载更新发布/联测指南：精确 URL、运维上传文件、归档结构、手动下载交互、客户端准备、验收与回滚边界。 |
-| [updater_mechanism_gap_and_remediation.md](updater_mechanism_gap_and_remediation.md) | Updater 当前机制与过去机制的差异分析、严重问题分级，以及建议的整改目标架构与分阶段落地顺序。 |
-## 设备/信号/性能专题
+未命中时先 `rg -n -i '关键词|类名' "$kb\Index.md"`，再用 `rg --files "$kb"` 查文件名，最后仅搜索候选文档正文。以下每篇文档只登记一次；标签“方案 / 历史 / 分析 / 参考”表示用途，不代表方案已落地或推断已验证。混合文档按正文区分现状与计划；当前架构优先于历史记录，代码现状仍须结合 CMake 纳入范围核实。
 
-| 文档 | 说明 |
-| :--- | :--- |
-| [n9040b_pulse_detection_122_narrow_pulse_test_guide.md](n9040b_pulse_detection_122_narrow_pulse_test_guide.md) | N9040B 脉冲检测实机教程：122含带宽选件设备的48/96 ns回归、30/40 ns连续档边界、25/50 ns的400 MSPS切换点和15/20 ns极限探索；固定Pulse Detection/Regions口径并按当前半幅边沿算法给出Width/PRI预期。 |
-| [arb_mode_summary.md](arb_mode_summary.md) | HTRA ARB 当前模式边界：Ordinary/IQS WAV 已使用单一 immutable payload、按设备能力校验并进入统一 runtime；ProgrammedArb 仍仅保留解析与路由语义。 |
-| [htra_multi_device_stageA_design_and_debug.md](htra_multi_device_stageA_design_and_debug.md) | HTRA 多设备（阶段A）设计与调试手册：枚举快照、对账、唯一 current、通用 retain-open、运行期 USB fallback 的 UID profile 恢复、启动连接意图与 ETH 恢复、不可中途取消的模态 ETH Connect、watchdog abort 真实回切终态、retained manual ETH 的异步 ping P0 防护，以及同 IP 5000/5001 共享机箱失联时的整组注销语义。 |
-| [htra_reference_clock_integration.md](htra_reference_clock_integration.md) | HTRA 参考时钟接入现状：Profile/FeatureSpec 设计取舍、配置流程、行业语义与前端联动约束。 |
-| [device_settings_panel_and_trigger_split_design.md](device_settings_panel_and_trigger_split_design.md) | 集中设备设置页的当前设计说明：入口迁移、standalone page 承载、Reference Clock / Trigger In / Trigger Out / RF Hardware 四组布局，记录新版 `device_config_trigger_out()` 的 UI 动态映射与 write-after 边界，以及独立直通设备的 RefOut、Fan Mode 与 Low Power 控制。 |
-| [common_capability_id_and_hw_version_strategy.md](common_capability_id_and_hw_version_strategy.md) | 公共 capability ID 与硬件版本分档策略：说明为什么应把 TriggerSource / RefClockSource 迁移到公共语义 ID，并在设备 open 后基于 model + hardware_version 生成最终 capability profile。 |
-| [htra_multi_model_playback_capability_refactor.md](htra_multi_model_playback_capability_refactor.md) | HTRA 多型号 Playback 能力重构：Phase A/B/C 已落地能力域、request revision 与文件 immutable payload；Phase D 已完成 Digital、DSSS、OFDM 的 domain/capacity、静默参数收口、生成前租约和 external payload 迁移，后续继续覆盖其他生成型业务与完整热插拔验收。 |
-| [playback_waveform_parameter_capability_policy.md](playback_waveform_parameter_capability_policy.md) | 当前启动 Playback business 的设备能力约束目标：按 `OPTION_BW_320M_TX` 对比无/有带宽选件档的采样率、容量和设备切换策略，统一 400 MSPS 单点语义，并详细定义 Pulse、AM/FM/PM、Ramp/AWGN 等多候选参数决策。 |
-| [playback_parameter_product_decision_matrix.md](playback_parameter_product_decision_matrix.md) | 面向产品经理的无/有 `OPTION_BW_320M_TX` Playback 参数范围对比表：列出各 business 的 UI 有效范围和采样率，区分能力已确定、推荐待实现与产品待确认项，并提供集中决策清单。 |
-| [manual_eth_connect_temporary_design.md](manual_eth_connect_temporary_design.md) | 手工 ETH 连接的临时设计说明：涵盖 Default/Last/重启/更新后的启动连接策略、默认关闭的启动 ETH Connect 编译选项、manual-managed device 的接入方式、共享 IP 下 5000/5001 顺序独立尝试与部分成功保留、异步模态且不可中途取消的连接交互、watchdog abort 终态、按 `IP + Port` 复用已打开 endpoint、普通 retain 与共享机箱失联清理语义，以及未来统一设备发现/打开抽象时的重构边界。 |
-| [analog_device_license_gating.md](analog_device_license_gating.md) | Analog 插件基于设备参数的许可证校验与剩余数字类波形生成门控说明：覆盖 `FixedLic=true/false` 语义、`currentDeviceOpenStateChanged(false) -> deviceConnected` 时序、USB/ETH 差异、UI 禁用与失败弹窗。 |
-| [analog_htra_provider_lifecycle_and_duplicate_panel_guard.md](analog_htra_provider_lifecycle_and_duplicate_panel_guard.md) | Analog / HTRA 基础调制 ownership 当前边界：说明 HTRA 已成为 AM/FM/Pulse/Digital Ramp/AWGN 的唯一 provider owner，Analog 侧同名 provider 切换机制与重复 panel 防护已拆除。 |
-| [gnss_plugin_integration_summary.md](gnss_plugin_integration_summary.md) | GNSS 插件从独立菜单、设备配置通路、实时状态发布到 Streaming 禁配策略的实现总结与剩余问题清单。 |
-| [large_waveform_streaming_plan.md](large_waveform_streaming_plan.md) | 大波形内存、125/1000 MiB 单大 payload 驻留合同、文件 Playback 直接 `int16_t` 物化/下载后释放，以及 Digital/DSSS/OFDM 的生成前租约与合作方指针直接 adoption。 |
-| [digital_modulation_user_interaction_flow.md](digital_modulation_user_interaction_flow.md) | 数字调制用户交互流程：覆盖设备能力驱动的 SPS 筛选、参数异步生成、125/1000 MiB 大波形截断确认、设备切换静默整组 reset，以及 Save IQ 完整保存流程。 |
-| [waveform_wav_export_format.md](waveform_wav_export_format.md) | SGStudio `Save IQ Data` 导出 WAV 的代码级格式说明：RIFF/PCM16 双通道头、I/Q 交织顺序、`prof` JSON chunk、动态偏移与文件上限，并区分 IQS-WAV。 |
-| [Waveform_Parameters_Constraints.md](Waveform_Parameters_Constraints.md) | 各类模拟/数字波形的默认值、参数意义、限制范围、IQ 带宽语义与 UI/业务联动总入口。 |
-| [htra_multitone_current_algorithm_and_vsg60_boundaries.md](htra_multitone_current_algorithm_and_vsg60_boundaries.md) | HTRA multitone 当前实现总览：汇总参数语义、tone lattice/notch/phase mode、采样率与 exact-period 点数策略、AutoScale 等价量化、preview 频谱、generation revision 取消语义、前端 table 同步边界，以及与 VSG60 的允许差异。 |
+## A-runtime
 
-## UI / QSS / 窗口系统
+- [入口：TX 请求、执行与回写](tx_execution_context_phase1_and_provider_migration.md)：TxSessionService / TxPipelineRuntime / executor / latest-intent。
+- [RF / Mod 业务概览](leader_rf_mod_business_overview.md)：公共设置、载波、基带、触发。
+- [UI 无关运行时与迁移史](ui_independent_runtime_and_minibar_design.md)：CoreRuntimeServices / DeviceRuntimeBridge；旧 in-process 部分为历史。
+- [Provider ownership](analog_htra_provider_lifecycle_and_duplicate_panel_guard.md)：Analog / HTRA 调制归属与已删除的重复 panel 防护。
+- [Streaming 数据流](streaming_dataflow.md)：legacy 双线程、队列、中断与重启。
+- [Streaming 桥接与双通道方案](streaming_bridge_rearm_reboot_refactor_plan.md)：session / endpoint / rearm / reboot / quiesce。
+- [GNSS 接入](gnss_plugin_integration_summary.md)：菜单、配置、实时状态与 Streaming 禁配。
+- [插件加载](plugin_metadata_and_loading_architecture.md)：metadata / JSON 依赖 / PluginManager 顺序。
+- [退出与关机](app_shutdown_exit_flow.md)：shutdown 两阶段、线程释放、死锁。
 
-| 文档 | 说明 |
-| :--- | :--- |
-| [device_status_ui_feedback.md](device_status_ui_feedback.md) | 设备状态前端反馈机制：MainWindow error 弹窗、C/S Minibar 抑制例外、warning 滚动播放与各链路去重规则。 |
-| [messagedialog_design.md](messagedialog_design.md) | MessageDialog 交互与组件设计约定；包含 MainWindow Wayland hosted 层级和 C/S Minibar 不展示、不转发、不重放提示的边界。 |
-| [auto_mod_user_intent_boundary.md](auto_mod_user_intent_boundary.md) | Auto Mod 的用户意图边界、FancyTabWidget 信号职责，以及 `MOD` 按钮 availability 收口规则。 |
-| [mainwindow_panel_minimum_height_wayland_contract.md](mainwindow_panel_minimum_height_wayland_contract.md) | MainWindow 业务 Panel 最小高度与 Raspberry Pi Wayland 1280x800 全屏边界：记录 Quick Waveform 隐藏页经 QStackedLayout 把窗口抬到 805px 的完整链路、Qt 5 spacer 陷阱，以及新增任何 Panel 时必须执行的尺寸检查清单。 |
-| [fancytabwidget_modulation_list_responsive_layout.md](fancytabwidget_modulation_list_responsive_layout.md) | FancyTabWidget 右侧调制列表的响应式布局设计：解释主窗两列结构、单列/双列切换、显式列模式、滚动条参与的动态单列宽度，以及修改这块 UI 时的边界与检查清单。 |
-| [titlebar_menubar_outputmode_and_overflow_behavior.md](titlebar_menubar_outputmode_and_overflow_behavior.md) | TitleBar 当前的菜单组、Preset/Single/Continue/Screenshot/MiniBar 工具组、视觉分隔符与 menubar overflow 实现说明，覆盖布局结构、主题样式、宽度压缩行为，以及 Raspberry Pi Wayland 下顶级菜单重复触摸的事件时序与处理边界。 |
-| [controls_notification_popup.md](controls_notification_popup.md) | `Controls::NotificationPopup` 的非模态通知语义、动画、悬停暂停自动关闭、可复制文本和调用方定位边界。 |
-| [high_dpi_development_practices.md](high_dpi_development_practices.md) | Windows / Qt 5 下 High DPI、多屏拖动、QSS 尺寸体系、资源倍率与应用内 UI 缩放的实践总结。 |
-| [multiscreen_popup_geometry_and_screen_topology.md](multiscreen_popup_geometry_and_screen_topology.md) | 外接屏断开、DPI/屏幕拓扑变化后 `EnumTextButton`、`Controls::ComboBox`、`PopupWidget`、TitleBar `QMenuBar/QMenu` popup 几何、首次映射、item 高度及 mouse/touch 二次点击收起行为。 |
-| [QSS_Best_Practices.md](QSS_Best_Practices.md) | QSS 编写与工程化最佳实践。 |
-| [labelbutton_style_state_workflow.md](labelbutton_style_state_workflow.md) | `LabelButton / InfoButton` 双行按钮的状态载体、样式刷新链与推荐修改流程，覆盖 `RF / General Settings / Sweep` 三种典型用法，并说明 instruction、skill、KnowledgeBase 的分工。 |
-| [commonpanel_level_unlevel_badge_ui.md](commonpanel_level_unlevel_badge_ui.md) | `CommonPanel` 中 `Level` 按钮的 `UNLEVEL` 局部 badge 设计说明：为何只影响启用 badge 的特定 `LabelButton`。 |
-| [soft_keyboard_architecture.md](soft_keyboard_architecture.md) | 当前软键盘体系总览：TouchNumKeyboard、BaseUnitAdapter、步长编辑、currentUnit/displayText 同步、业务层修正后的单位恢复，以及 C/S helper-local 键盘、typed IPC 和 managed overlay 边界。 |
-| [wayland_raspberry_pi_system_keyboard_integration.md](wayland_raspberry_pi_system_keyboard_integration.md) | 树莓派 Wayland 桌面下把系统键盘整合进普通 `QLineEdit` 输入流程的实现说明：覆盖 `QInputMethod` 请求为何不足、为何要回退到 `sm.puri.OSK0.SetVisible(true/false)`、`Controls::Keyboard` 的共享收口方式，以及 `EthConnectDialog / SaveFileDlg` 的接入与排障步骤。 |
-| [minibar_wayland_layershell_debug_guide.md](minibar_wayland_layershell_debug_guide.md) | Helper-only Minibar LayerShellQt 交互与 Debug 的权威总入口：surface 角色、visual geometry、overlay outside-click、popup 首次映射前配置、Win32 回归根因与双平台回归矩阵。 |
-| [minibar_wayland_layer_shell_qt_integration.md](minibar_wayland_layer_shell_qt_integration.md) | Linux / Raspberry Pi Wayland 下 helper 引入 vendored Qt5 `layer-shell-qt` 的实现说明、构建依赖、运行时验证和常见错误排查，并保留已删除 in-process host 的历史设计。 |
-| [minibar_helper_layershell_parity_gaps.md](minibar_helper_layershell_parity_gaps.md) | `SGStudioMiniBar` 当前 layer-shell base/keyboard、Sweep/MOD/menu overlay、平台分流、popup ownership 与首次映射前配置契约。 |
-| [minibar_popup_host_style_and_focus_status.md](minibar_popup_host_style_and_focus_status.md) | 已删除 in-process popup host 的精简历史结论：保留 host 视觉、Wayland overlay、native ownership 与关闭顺序约束。 |
-| [WAYLAND_FRAMELESS_OVERLAY_PATTERN.md](WAYLAND_FRAMELESS_OVERLAY_PATTERN.md) | Wayland 下无边框弹窗：overlay + 遮罩模拟模态的推荐模式。 |
-| [frameless_multimon_dpi_white_border_issue.md](frameless_multimon_dpi_white_border_issue.md) | 多屏/高 DPI 下 frameless 白边问题与处理经验。 |
+## B-device
 
-## 部署与工程
+- [入口：设备发现](device_discovery_architecture.md)：枚举与职责边界。
+- [设备切换与 UI 配置链](device_open_ui_config_flow.md)：open → UI → orchestrator / runtime。
+- [多设备生命周期](htra_multi_device_stageA_design_and_debug.md)：current / retain-open / fallback / watchdog / A-B 机箱。
+- [多实例 USB 占用](multi_instance_usb_ownership_and_startup_gate.md)：InstanceStateRegistry / startup gate / UID 恢复。
+- [手工 ETH 连接](manual_eth_connect_temporary_design.md)：临时设计、启动策略、IP:Port、模态连接。
+- [USB / ETH 断联恢复分析](eth设备和usb设备断联恢复的异同点分析.md)：失联判定、注销、coordinator 差异。
+- [H2 API v2.0 参考](htra_h2_api_v2_0_usage.md)：设备能力与 API 调用顺序。
+- [设备设置与 Trigger 拆分](device_settings_panel_and_trigger_split_design.md)：Reference Clock / Trigger In-Out / RF Hardware。
+- [参考时钟接入](htra_reference_clock_integration.md)：Profile / FeatureSpec 与前端联动。
+- [Capability ID 分档方案](common_capability_id_and_hw_version_strategy.md)：model / hardware_version / 公共语义 ID。
+- [RF Port 能力与绑定](rfport_open_query_and_ui_binding.md)：open 查询、EnumTextButton / property。
+- [型号显示名](device_model_display_name_rules.md)：device_info.xml 条件别名。
+- [Analog 许可证](analog_device_license_gating.md)：FixedLic、USB/ETH 时序与 UI 门控。
+- [PGA 平台状态](pga_runtime_realtime_status_chain.md)：CPU 温度、电池、状态栏链路。
+- [GPIO 位掩码分析](GPIO_interface.md)：setbits / resetbits 语义推断，需核实 API 契约。
 
-| 文档 | 说明 |
-| :--- | :--- |
-| [linux_build_package_unified_entry.md](linux_build_package_unified_entry.md) | Linux 发布总入口与运行指南：250 的三目标、Raspberry Pi/RK3588 共用 AArch64 归档、应用内 QPA 自动选择和无需 launcher 的直接执行方式。 |
-| [raspberry_pi_132_build_host_250_compatibility.md](raspberry_pi_132_build_host_250_compatibility.md) | 250 共用交叉包对 108 Raspberry Pi 与 RK3588 的 ABI、Qt、Wayland/xcb、运行库、直接启动和双端验收边界。 |
-| [RPATH_MECHANISM.md](RPATH_MECHANISM.md) | Linux 部署：基于 `$ORIGIN` 的 RPATH 相对路径查找机制。 |
-| [cmake_thirdparty_module_best_practices.md](cmake_thirdparty_module_best_practices.md) | 第三方依赖独立 CMake 模块的标准写法：`IMPORTED + INTERFACE + ALIAS`、Win32 快路径、跨平台惰性分支与部署边界。 |
-| [cmake_build_output_clean_run_workflow.md](cmake_build_output_clean_run_workflow.md) | 本仓库 CMake 的 configure、build、运行目录布局、插件同步、清理边界与 VS Code / Qt Creator 使用流程总览。 |
-| [runtime_layout_repo_root_vs_build_tree.md](runtime_layout_repo_root_vs_build_tree.md) | 正式说明 `SGS_RUNTIME_LAYOUT` 的双布局约束：为什么默认值保留给 Qt Creator 的 `build-tree`、为什么 VS Code 必须显式用 `repo-root`，以及 `plugin-runtime` staging 与 launch 前置保护的边界。 |
-| [windows_build_bat_updater_packaging_hygiene.md](windows_build_bat_updater_packaging_hygiene.md) | Windows 下 `scripts/build.bat` 的 updater 打包依赖收敛、3rdParty 增量构建修复、当前验证结论，以及未来应优先修改的 CMake / 打包入口文件。 |
-| [build_script_packaging_and_watermark_guide.md](build_script_packaging_and_watermark_guide.md) | 统一说明 Windows/Linux 打包脚本的职责、参数、`--rebuild` 缓存边界、水印开关，以及 `QuickWaveFormData` 与 Linux 启动脚本的归档布局。 |
-| [vectorcore_bnc_en_branding_profile.md](vectorcore_bnc_en_branding_profile.md) | VectorCore `BNC_en` 定制版的 CMake profile、应用/更新包命名、九分辨率 Windows ICO 与 aarch64 PNG 资源、dark theme 色彩边界、在线更新选项的 UI 隐藏规则及三套打包命令。 |
-| [windows_vscode_environment_pitfalls.md](windows_vscode_environment_pitfalls.md) | Windows / VS Code 环境下的常见非业务代码问题：`pwsh.exe` 提示与 Qt includePath / IntelliSense 缺失。 |
-| [windows_qt_runtime_mixing_pitfall.md](windows_qt_runtime_mixing_pitfall.md) | Windows / CMake / vcpkg 混合环境下 Qt 运行时混装导致 SVG 图标失效的排查、根因与修复策略。 |
+## C-playback
 
-## 版本与发布
+- [入口：波形参数约束](Waveform_Parameters_Constraints.md)：默认值、采样率、IQ 带宽、UI 联动。
+- [多型号 Playback 能力迁移](htra_multi_model_playback_capability_refactor.md)：能力域、revision、immutable payload、分阶段进度。
+- [设备能力参数策略](playback_waveform_parameter_capability_policy.md)：OPTION_BW_320M_TX、400 MSPS 与参数决策目标。
+- [产品参数决策矩阵](playback_parameter_product_decision_matrix.md)：无/有选件对比、待实现与待确认项。
+- [ARB 模式入口](arb_mode_summary.md)：Ordinary / IQS / ProgrammedArb 解析与 runtime 边界。
+- [OrdinaryWav 截取与周期](arb_ordinary_wav_slice_period_semantics.md)：sampleOffset / samplesToUse / period。
+- [大波形内存与下载](large_waveform_streaming_plan.md)：payload 驻留、125/1000 MiB、租约与下载后释放。
+- [Digital 大波形汇报](digital_large_waveform_status_summary.md)：截断播放与完整保存的阶段总结。
+- [Save IQ 导出 WAV](waveform_wav_export_format.md)：PCM16、I/Q 交织、prof JSON。
+- [IQS-WAV 格式参考](IQS-WAV文件格式说明.md)：录制文件、trig / prof MsgPack，区别于 Save IQ。
 
-| 文档 | 说明 |
-| :--- | :--- |
-| [gui_update_log_2.6.md](gui_update_log_2.6.md) | SGStudio GUI 2.6.1 – 2.6.3.3 各版本更新日志：按 git 版本 bump 边界整理的 feat / fix / refactor 与依赖对齐记录。 |
+## D-waveform
 
-## Git / 协作
+- [Digital 交互入口](digital_modulation_user_interaction_flow.md)：SPS、异步生成、截断、reset、保存。
+- [Multitone 算法入口](htra_multitone_current_algorithm_and_vsg60_boundaries.md)：tone / notch / phase / AutoScale / preview。
+- [Multitone 与 VSG60 对比](multitone_vsg60_three_case_comparison_and_playback_consistency.md)：三组样本与 Playback 一致性。
+- [iqtone.m 借鉴候选](htra_multitone_iqtone_reuse_candidates.md)：历史参考、后续优化建议。
+- [Multitone / Pulse RMS 原理](htra_rms_power_multitone_pulse_principle.md)：PEP、占空比与满幅参考。
+- [AM 自研对齐方案](am_baseband_self_implementation_alignment.md)：复基带参数、离散 IQ 与参考行为。
+- [FM 自研对齐方案](fm_baseband_self_implementation_alignment.md)：复基带参数与参考行为。
+- [Ramp 自研实现](ramp_self_implementation_alignment.md)：波形原理与 HTRA 实现边界。
+- [标准星座与 VSG60 坐标](digital_standard_constellation_vs_vsg60_custom_iq.md)：理论预览与自定义符号映射。
+- [16QAM raw cloud 原理](digital_16qam_raw_cloud_vs_symbol_constellation.md)：过采样、RRC、匹配滤波。
+- [16QAM 星座复现](digital_16qam_wav_constellation_reproduction_guide.md)：离线 WAV 分析与出图。
+- [N9040B AM/FM/PM 测试](n9040b_am_fm_pm_demod_test_plan.md)：射频解调验证方案。
+- [N9040B 窄脉冲测试](n9040b_pulse_detection_122_narrow_pulse_test_guide.md)：122 设备、Pulse Detection、Width / PRI。
+- [Ramp 频谱仪测试](htra_ramp_spectrum_analyzer_test_plan.md)：SWP / IQS / DET / RTA 验证方案。
 
-| 文档 | 说明 |
-| :--- | :--- |
-| [Git_Best_Practices.md](Git_Best_Practices.md) | Git 基础约定与实践清单。 |
-| [GIT_WORKFLOW_GUIDE.md](GIT_WORKFLOW_GUIDE.md) | 分支/合并/发布的工作流指南。 |
-| [git_retag_force_push_and_checkout_workflow.md](git_retag_force_push_and_checkout_workflow.md) | 重建标签到目标提交、强制覆盖远端同名标签、切到标签核对并切回原分支的一套可复制命令。 |
+## E-scpi
 
-## AI / Copilot 协作
+- [入口：SCPI 接入审阅与方案](scpi_review_and_integration_plan.md)：TX/UI 回写、错误语义、ScpiIntentService 迁移。
+- [ListMode 命令调试入口](listmode_scpi调试指南.md)：TCP 5025、命令表、查询响应、R&S 兼容实测流程。
+- [ListMode 接口设计](listmode接口实现.md)：MScan、真实执行与兼容映射边界。
+- [R&S List Mode 参考](rs_list_mode_scpi_reference.md)：R&S 的 listmode scpi命令、触发、索引、学习与文件容器。
 
-| 文档 | 说明 |
-| :--- | :--- |
-| [copilot_prompt_workflow_notes.md](copilot_prompt_workflow_notes.md) | 自定义 prompt、仓库 instruction、TaskLog、KnowledgeBase 与 Copilot 默认分析流程的分工说明，并记录为何当前仓库更适合轻量入口 prompt，而不是直接照搬 VlppParser2 的重型多阶段体系。 |
+## F-sweep
 
-## 坑位 (Pitfalls)
+- [FixedCw / SweepCw 切换](fixedcw_sweepfscan_fixedcw_api_summary.md)：FScan 往返 API 调用链。
+- [Sweep 预校验](sweep_preview_validation_boundary.md)：编辑态 preview、归一化与发射边界。
 
-| 文档 | 说明 |
-| :--- | :--- |
-| [Pitfalls/Property_Binding_Duplicate_SoftKeyboard.md](Pitfalls/Property_Binding_Duplicate_SoftKeyboard.md) | 同一个全局 property 被多个控件或隐藏 panel 绑定时，`beginEditing` 被多个订阅者响应并打开重复软键盘的根因、排查和防回归规则。 |
-| [Pitfalls/Qt_QSettings_INI_General_Group.md](Pitfalls/Qt_QSettings_INI_General_Group.md) | QSettings 的 `[General]` 解析陷阱与排查方式。 |
-| [Pitfalls/Qt_CleanPath_IPC_Path_Separator.md](Pitfalls/Qt_CleanPath_IPC_Path_Separator.md) | Windows 下 `QDir::cleanPath()` 的 `/` 表示与 `QDir::separator()` 返回的 `\` 混用，导致根目录子文件被误判越界；包含统一路径比较、IPC 权威校验、取证顺序和跨平台回归矩阵。 |
-| [Pitfalls/Qt_FocusProxy_SoftKeyboard_StepEdit.md](Pitfalls/Qt_FocusProxy_SoftKeyboard_StepEdit.md) | overlay + 软键盘场景下的焦点路由陷阱与修复手法。 |
-| [Pitfalls/SoftKeyboard_MessageDialog_Reentrancy_And_Lifetime.md](Pitfalls/SoftKeyboard_MessageDialog_Reentrancy_And_Lifetime.md) | 2026-05 软键盘提交、步进、MessageDialog 时序与 focusWidget 生命周期问题的根因、已落地修复和快速排障清单。 |
-| [Pitfalls/Property_Binding_Duplicate_SoftKeyboard.md](Pitfalls/Property_Binding_Duplicate_SoftKeyboard.md) | 记录同一个 `PropertySystem::IProperty` 被多个控件或隐藏 panel 绑定时，一次 `beginEditing` 触发多个订阅者并打开重复软键盘的根因、判断方法，以及 `isEditTriggerFromWidget(...)` guard 的适用边界。 |
+## G-minibar
+
+- [入口：双进程 Minibar](minibar_cs_helper_scpi_architecture.md)：main 设备 owner、helper typed IPC、乐观 UI、隐藏主窗提示抑制。
+- [Wayland 交互排障入口](minibar_wayland_layershell_debug_guide.md)：surface / geometry / focus / lifetime，含历史证据。
+- [Helper LayerShell 现状](minibar_helper_layershell_parity_gaps.md)：base / keyboard / overlay、ownership、首次映射。
+- [LayerShellQt 集成](minibar_wayland_layer_shell_qt_integration.md)：Qt5 依赖、构建与排障，含旧 host 历史。
+- [旧 popup host 历史](minibar_popup_host_style_and_focus_status.md)：已删除的 in-process 路径；仅供视觉、焦点与关闭顺序回溯。
+
+## H-ui
+
+- [QSS 入口](QSS_Best_Practices.md)：样式编写与工程约定。
+- [LabelButton 状态样式](labelbutton_style_state_workflow.md)：InfoButton、刷新链、RF / Settings / Sweep。
+- [双行按钮空间限制](labelbutton_dual_row_vertical_space_limit.md)：padding / labelMargins 与布局约束。
+- [Level UNLEVEL badge](commonpanel_level_unlevel_badge_ui.md)：CommonPanel 局部标记。
+- [Auto Mod 用户意图](auto_mod_user_intent_boundary.md)：FancyTabWidget 信号与 MOD availability。
+- [调制列表响应式布局](fancytabwidget_modulation_list_responsive_layout.md)：单/双列、宽度与滚动条。
+- [TitleBar 菜单与溢出](titlebar_menubar_outputmode_and_overflow_behavior.md)：输出模式、工具组、重复触摸。
+- [Windows 主窗最小尺寸](mainwindow_frameless_minimum_size_contract.md)：native resize 与 minimumSizeHint。
+- [Wayland Panel 高度与启动时序坑](mainwindow_panel_minimum_height_wayland_contract.md)：延迟 show、隐藏窗口临时几何、发行版 Qt 与自带标准 Qt 的补丁差异、Wayland 全屏状态栏裁切。
+- [High DPI 入口](high_dpi_development_practices.md)：Qt5 缩放、资源倍率、多屏拖动。
+- [多屏 popup 几何](multiscreen_popup_geometry_and_screen_topology.md)：屏幕断开、DPI、EnumTextButton / ComboBox / QMenu。
+- [Frameless 白边排障](frameless_multimon_dpi_white_border_issue.md)：多屏与高 DPI。
+- [设备状态 UI 反馈](device_status_ui_feedback.md)：error / warning 去重与 Minibar 例外。
+- [MessageDialog](messagedialog_design.md)：交互、hosted 层级与提示边界。
+- [NotificationPopup](controls_notification_popup.md)：非模态通知、动画、定位与自动关闭。
+- [Wayland 无边框弹窗](WAYLAND_FRAMELESS_OVERLAY_PATTERN.md)：overlay 与遮罩模式。
+- [Wayland 嵌套模态排障](wayland_nested_modal_dialog_issue_record.md)：弹窗消失、输入阻塞与工程决策。
+
+## I-input-pitfalls
+
+- [入口：软键盘体系](soft_keyboard_architecture.md)：TouchNumKeyboard / BaseUnitAdapter / 单位同步 / helper-local。
+- [数值步长策略](numeric_step_strategy_guidelines.md)：可编辑 / 125 / 固定步长选择。
+- [树莓派系统键盘](wayland_raspberry_pi_system_keyboard_integration.md)：QLineEdit / QInputMethod / OSK0 / DBus。
+- [重复软键盘](Pitfalls/Property_Binding_Duplicate_SoftKeyboard.md)：隐藏 panel、多控件绑定、beginEditing 来源。
+- [焦点与步长编辑](Pitfalls/Qt_FocusProxy_SoftKeyboard_StepEdit.md)：focusProxy / overlay 路由。
+- [提交重入与生命周期](Pitfalls/SoftKeyboard_MessageDialog_Reentrancy_And_Lifetime.md)：MessageDialog / focusWidget。
+- [INI General 组](Pitfalls/Qt_QSettings_INI_General_Group.md)：QSettings 解析陷阱。
+- [IPC 路径误判越界](Pitfalls/Qt_CleanPath_IPC_Path_Separator.md)：cleanPath 与 separator 混用。
+
+## J-build-windows
+
+- [入口：CMake 工作流](cmake_build_output_clean_run_workflow.md)：configure / build / 输出 / 清理。
+- [运行布局](runtime_layout_repo_root_vs_build_tree.md)：SGS_RUNTIME_LAYOUT、repo-root / build-tree、插件 staging。
+- [Windows clone 到 stage](windows_cmake_clone_build_stage_guide.md)：环境准备、依赖归属与交付包。
+- [打包脚本与水印](build_script_packaging_and_watermark_guide.md)：Windows/Linux 参数、rebuild 与归档。
+- [build.bat 打包依赖](windows_build_bat_updater_packaging_hygiene.md)：updater / 3rdParty 增量构建。
+- [MSVC 运行库打包](windows_stage_msvc_runtime_packaging_strategy.md)：runtime / UCRT / vc_redist 边界。
+- [Qt 混装与 SVG 失效](windows_qt_runtime_mixing_pitfall.md)：DLL 来源与 Debug/Release 差异。
+- [VS Code 环境排障](windows_vscode_environment_pitfalls.md)：pwsh、includePath、IntelliSense。
+- [Neutralized 品牌](windows_neutralized_branding_workflow.md)：build / stage 的品牌一致性。
+- [VectorCore BNC_en 品牌](vectorcore_bnc_en_branding_profile.md)：profile、图标、主题与更新包命名。
+
+## K-linux
+
+- [入口：Linux 构建发布](linux_build_package_unified_entry.md)：250 / 108 两入口、Raspberry Pi / RK3588 共用包、直接启动。
+- [AArch64 兼容性](raspberry_pi_132_build_host_250_compatibility.md)：ABI、Qt、Wayland/xcb 与双目标验收。
+- [x86_64 X11 与 Wayland 迁移方案](linux_x86_64_x11_and_future_labwc_wayland.md)：当前 xcb 边界、未来 labwc artifact。
+- [RPATH](RPATH_MECHANISM.md)：$ORIGIN 相对库路径。
+- [VMware 直连树莓派](ubuntu18_vmware_raspberry_pi_bridge_setup.md)：Ubuntu18、NAT + 桥接、静态地址与回滚。
+
+## L-updater
+
+- [入口：Updater 当前实现](updater_firmware_update_mechanism.md)：下载、version.json、固件 Profile、maintenance。
+- [Updater 整改重点](updater_mechanism_gap_and_remediation.md)：已收敛行为、剩余问题与验收。
+- [Standard CN 远程更新联测](standard_cn_remote_manual_update_test_guide.md)：发布 URL、包结构、手工下载与回滚。
+- [A/B 顺序固件更新分析](shared_chassis_ab_sequential_updater_analysis.md)：共享 IP 概率失败、待取证假设。
+- [SAStudioEx 迁移参考](updaterFromSAStudioEx-更新全流程迁移说明.md)：外部项目更新链，非 SGStudio 当前实现入口。
+
+## M-collaboration
+
+- [GUI 2.6 版本日志](gui_update_log_2.6.md)：2.6.1–2.6.3.3 变更记录。
+- [Git 基础约定](Git_Best_Practices.md)：日常操作与检查。
+- [Git 分支工作流](GIT_WORKFLOW_GUIDE.md)：合并与发布。
+- [重建标签工作流](git_retag_force_push_and_checkout_workflow.md)：目标提交、远端标签覆盖与切回分支。
+- [Agent Loop Harness 与轻量协作](copilot_prompt_workflow_notes.md)：instruction / prompt / TaskLog / KnowledgeBase 分工，以及执行、观察、验证、证据持久化闭环。
+
+## 索引维护
+
+- 新增、重命名或删除知识文档时同步本页；每篇只放入一个最相关分区，使用“短标题 + 区分性关键词”，避免重复文件名和长摘要。
+- 每区不超过 18 个条目，以便一次定长读取；扩展时同步首页路由。保留文件原名，链接相对知识库根目录；不设 Recent Additions 或另一份全量清单。
+- 只索引现存知识文档；任务过程放 `D:\development\skills\.github\TaskLog`，复用流程到 `D:\development\skills\.github\skills` 按文件夹/前言选 SKILL.md，具体规则留在各自真源。
+- 维护后检查链接存在、无重复、无漏收；缩短描述时保留适用平台、历史/方案属性和容易混淆的边界。
