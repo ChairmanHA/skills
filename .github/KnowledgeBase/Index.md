@@ -1,5 +1,5 @@
 # SGStudio 知识库索引
-本页是文档清单与检索入口；执行规则见项目 AGENTS.md / 共享 copilot-instructions.md。
+本页是文档清单与检索入口；执行规则统一见项目 AGENTS.md。
 
 ## 快速定位
 
@@ -37,6 +37,7 @@ Get-Content -Encoding UTF8 -LiteralPath "$kb\listmode_scpi调试指南.md" | Sel
 
 - [入口：TX 请求、执行与回写](tx_execution_context_phase1_and_provider_migration.md)：TxSessionService / TxPipelineRuntime / executor / latest-intent。
 - [RF / Mod 业务概览](leader_rf_mod_business_overview.md)：公共设置、载波、基带、触发。
+- [单通道 H2 信号流 Home 设计依据](h2_single_channel_signal_flow_home_rationale.md)：仅依据当前 h2_api.h；USG 风格基带/调制/射频分工与状态证据边界，尚未实施。
 - [UI 无关运行时与迁移史](ui_independent_runtime_and_minibar_design.md)：CoreRuntimeServices / DeviceRuntimeBridge；旧 in-process 部分为历史。
 - [Provider ownership](analog_htra_provider_lifecycle_and_duplicate_panel_guard.md)：Analog / HTRA 调制归属与已删除的重复 panel 防护。
 - [Streaming 数据流](streaming_dataflow.md)：legacy 双线程、队列、中断与重启。
@@ -65,7 +66,7 @@ Get-Content -Encoding UTF8 -LiteralPath "$kb\listmode_scpi调试指南.md" | Sel
 
 ## C-playback
 
-- [入口：波形参数约束](Waveform_Parameters_Constraints.md)：默认值、采样率、IQ 带宽、UI 联动。
+- [入口：波形参数约束](Waveform_Parameters_Constraints.md)：默认值、采样率、IQ 带宽、UI 联动；含 AWGN 单遍/分块 FIR 优化、实测耗时及频谱/RMS验收。
 - [多型号 Playback 能力迁移](htra_multi_model_playback_capability_refactor.md)：能力域、revision、immutable payload、分阶段进度。
 - [设备能力参数策略](playback_waveform_parameter_capability_policy.md)：OPTION_BW_320M_TX、400 MSPS 与参数决策目标。
 - [产品参数决策矩阵](playback_parameter_product_decision_matrix.md)：无/有选件对比、待实现与待确认项。
@@ -103,7 +104,7 @@ Get-Content -Encoding UTF8 -LiteralPath "$kb\listmode_scpi调试指南.md" | Sel
 ## F-sweep
 
 - [FixedCw / SweepCw 切换](fixedcw_sweepfscan_fixedcw_api_summary.md)：FScan 往返 API 调用链。
-- [Sweep 预校验](sweep_preview_validation_boundary.md)：编辑态 preview、归一化与发射边界。
+- [Sweep 预校验与能力](sweep_preview_validation_boundary.md)：编辑态 preview、归一化与发射边界、F60 ListMode 限制。
 
 ## G-minibar
 
@@ -117,7 +118,7 @@ Get-Content -Encoding UTF8 -LiteralPath "$kb\listmode_scpi调试指南.md" | Sel
 
 - [QSS 入口](QSS_Best_Practices.md)：样式编写与工程约定。
 - [LabelButton 状态样式](labelbutton_style_state_workflow.md)：InfoButton、刷新链、RF / Settings / Sweep。
-- [双行按钮空间限制](labelbutton_dual_row_vertical_space_limit.md)：padding / labelMargins 与布局约束。
+- [双行按钮空间限制](labelbutton_dual_row_vertical_space_limit.md)：padding / labelMargins；[5 寸字号与物理换算](<5 寸 1024×600 的物理换算（“模拟”基线）.md>)：instrument 24px / 64px 参数按钮与真机验收边界。
 - [Level UNLEVEL badge](commonpanel_level_unlevel_badge_ui.md)：CommonPanel 局部标记。
 - [Auto Mod 用户意图](auto_mod_user_intent_boundary.md)：FancyTabWidget 信号与 MOD availability。
 - [调制列表响应式布局](fancytabwidget_modulation_list_responsive_layout.md)：单/双列、宽度与滚动条。
@@ -135,7 +136,7 @@ Get-Content -Encoding UTF8 -LiteralPath "$kb\listmode_scpi调试指南.md" | Sel
 
 ## I-input-pitfalls
 
-- [入口：软键盘体系](soft_keyboard_architecture.md)：TouchNumKeyboard / BaseUnitAdapter / 单位同步 / helper-local。
+- [入口：软键盘体系](soft_keyboard_architecture.md)：TouchNumKeyboard / BaseUnitAdapter / 单位同步 / helper-local / instrument 键盘与 Panel QSS 边界。
 - [数值步长策略](numeric_step_strategy_guidelines.md)：可编辑 / 125 / 固定步长选择。
 - [树莓派系统键盘](wayland_raspberry_pi_system_keyboard_integration.md)：QLineEdit / QInputMethod / OSK0 / DBus。
 - [重复软键盘](Pitfalls/Property_Binding_Duplicate_SoftKeyboard.md)：隐藏 panel、多控件绑定、beginEditing 来源。
@@ -167,7 +168,7 @@ Get-Content -Encoding UTF8 -LiteralPath "$kb\listmode_scpi调试指南.md" | Sel
 
 ## L-updater
 
-- [入口：Updater 当前实现](updater_firmware_update_mechanism.md)：下载、version.json、固件 Profile、maintenance。
+- [入口：Updater 当前实现](updater_firmware_update_mechanism.md)：下载、version.json、固件 Profile、H2 命名空间过渡、maintenance。
 - [Updater 整改重点](updater_mechanism_gap_and_remediation.md)：已收敛行为、剩余问题与验收。
 - [Standard CN 远程更新联测](standard_cn_remote_manual_update_test_guide.md)：发布 URL、包结构、手工下载与回滚。
 - [A/B 顺序固件更新分析](shared_chassis_ab_sequential_updater_analysis.md)：共享 IP 概率失败、待取证假设。

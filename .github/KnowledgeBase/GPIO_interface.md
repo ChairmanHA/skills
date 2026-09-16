@@ -266,3 +266,17 @@ OFF -> device_gpio_resetbits(..., mask);
 ```
 
 但要额外确认这个 GPIO 控制的射频器件是**高有效**还是**低有效**。如果是低有效，就把 ON/OFF 的调用反过来。
+
+---
+
+## SGStudio 当前接入方式（2026-09-15）
+
+当前 H2 API 只提供 `device_gpio_setbits()` 和 `device_gpio_resetbits()`，没有 GPIO 数量查询或电平回读接口。因此 `FancyDevice` 保持以下边界：
+
+- GPIO 数量继续由设备 `HardwareVersion` 的高字节推导：`0` 表示不支持，`0x60` 表示 8 路，其他非零值表示 4 路。
+- 设备打开后，软件用有效 GPIO 掩码调用一次 `device_gpio_resetbits()`，把本次会话的初始状态统一为低电平。
+- 后续 UI 状态来自本次会话内的成功写入缓存；只有 H2 API 调用成功后才更新缓存。
+- 设备关闭、切换或断联时清空缓存，避免下一次会话显示旧状态。
+- `queryGpioState()` 返回正数 GPIO 数量时，Core 才动态注册 `System > GPIO` 菜单入口。
+
+这里的缓存不是硬件回读。如果未来 H2 API 增加 GPIO 状态或能力查询，应优先改为消费真实 API 结果，并移除对应的推导或缓存职责。

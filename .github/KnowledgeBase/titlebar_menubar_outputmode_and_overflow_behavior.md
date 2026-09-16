@@ -32,6 +32,10 @@ TitleBar 菜单 popup 的多屏/断屏问题已沉淀到 [多屏 Popup 几何与
 
 `[logo][QMenuBar][Single/Continue][spacer][min][max][close]`
 
+`ui-mode=instrument` 是明确例外：隐藏 `logo` 后，布局直接变为
+`[QMenuBar][Single/Continue][spacer]`；菜单与相邻命令组的既有顺序和间距不变，
+main 模式仍保留完整结构。
+
 注意：这里 `Single / Continue` 虽然视觉上紧跟 `QMenuBar`，但它们并不属于 `QMenuBar` 内部，也不再挂在 `cornerWidget` 上。
 
 ## 2. 当前布局结构
@@ -41,6 +45,10 @@ TitleBar 菜单 popup 的多屏/断屏问题已沉淀到 [多屏 Popup 几何与
 - 左侧：`iconLabel`
 - 中间：`menubarLayout`
 - 右侧：`horizontalLayout`
+
+instrument 模式通过 `TitleBar::setLogoVisible(false)` 隐藏 `iconLabel`。Qt 布局会同时
+回收该控件的占位和相邻间距，因此 `menubarLayout` 自然成为最左侧可见项；不需要重建
+菜单栏或修改 action 注册。
 
 顶层 stretch 当前为：
 
@@ -393,3 +401,16 @@ Do not move `Preset` back into `QMenuBar` or split the icon commands into a
 separate business widget merely to preserve these separator lines. The lines
 express visual grouping only; the stable behavior boundary remains one
 menubar host plus one tool host.
+
+## 2026-09-14 Addendum: Instrument popup menu typography
+
+In `ui-mode=instrument`, both the visible title `QMenuBar` entries and the
+`QMenu` popup items use 24px text. The popup override is scoped through
+`mainContent[uiMode="instrument"] Core--Internal--TitleBar QMenu::item` and is
+appended after the active dark/light theme, so Main mode and unrelated popup
+menus retain their base-theme typography.
+
+The existing popup geometry remains authoritative: item minimum height stays
+50px, horizontal padding and minimum width are unchanged, and submenu
+ownership, touch handling, selection/disabled colors, and geometry refresh
+behavior are unaffected.

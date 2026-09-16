@@ -54,6 +54,23 @@ RMS = Level - PAPR
 如果每个 provider 都用自己的本地满幅 PEP 定义，RMS 应该是多少？
 ```
 
+## ARB / QuickWaveform / IQS Streaming 的复包络 AutoScale
+
+2026-09-16 用户确认：设备 Level 的 PEP 参考确实对应角点 `(32767,32767)`。ARB OrdinaryWav/IqsWav 与 QuickWaveform 的共享文件 AutoScale 已统一到复包络半径 32767，与 IQS Streaming 现有归一化定义一致。
+
+```text
+gain = 32767 / sqrt(max(rawI² + rawQ²))
+ideal peakOffset = 10log10(32767² / (2 * 32767²)) = -3.0103 dB
+actual PEP = Level + peakOffsetFromFullScalePepDb
+RMS = Level + rmsOffsetFromFullScalePepDb
+```
+
+- 原始峰值扫描包含 -32768，不使用 RMS helper 的分量钳位；两个 -32768 的平方和为 2^31，用 uint32 保存。
+- 非零波形在 AutoScale 后理想 PEP 为 Level - 3.0103 dB；最终 int16 截断引入微小偏差，实际指标以量化样点统计为准，不能硬编码显示偏移。
+- RMS 的角点参考、Pulse、period 补零分母不变；无需添加 3 dB 补偿。
+- 手动 IQScale 不保证固定峰值。IQS Streaming 还会叠加 IQScale，100% 且峰值元数据有效时才适用上述归一化参考；普通 WAV Streaming 没有这条 IQS AutoScale。
+- ARB/QuickWaveform 仍扫描实际所选切片；本次未新增峰值元数据加速，未改变 ProgrammedArb。
+
 ## Pulse
 
 当前 HTRA pulse 的幅度定义是：

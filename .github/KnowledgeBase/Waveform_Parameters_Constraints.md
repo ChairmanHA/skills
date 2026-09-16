@@ -472,7 +472,63 @@ $$
 - AWGN 不再采用“固定 125 Msps”模型。
 - 对窄带 AWGN，采样率会随带宽下降而下降，因此可用最大长度会相应增加。
 - Bandwidth/Length 在编辑和设备切换时由 business 静默收口并永久回写；容量变小时关闭 Enabled，但不弹窗。
-- 生成采用两遍流式噪声统计/量化，只保留 65 tap 的小型 FIR/history 状态，最终 IQ 直接写入唯一租约 builder，不建立完整浮点噪声副本。
+- 生成采用单遍解析归一化：固定 seed=23 的单位方差高斯噪声经过原有 65-tap FIR，以 `0.2 * 32767 / sqrt(sum(h[k]^2))` 缩放后量化。归一化对象为总体理论 RMS，不再对整段记录测量/消除均值或强制校准样本 RMS；短记录允许自然统计波动，最终功率指标仍由 Core 扫描实际 int16 payload 得到。同参数在同一实现下保持确定性，但不保证与旧两遍版本逐点相同。
+- FIR 使用 I/Q 分离的固定工作区，每块追加最多4096点并连续保留64点输入历史；启动历史同样来自高斯噪声，不以零补齐。每组8个独立输出按原tap顺序累加，消除逐tap环形取模，为编译器沿输出方向向量化提供条件；实际向量化和加速比待目标平台验证。工作区约65 KiB，与Length无关，最终 IQ 直接写入唯一租约 builder，不建立完整浮点噪声副本。
+- `[AWGN timing]` 在每次生成完成时记录样点数、采样率、带宽、payload字节数及 `allocation_ms / random_ms / fir_quantize_ms / generation_ms`；异步worker另记录一次 `metrics_ms`。`generation_ms` 包含分配、系数准备、随机数、FIR/量化及发布，不含功率扫描、设备下载；`fir_quantize_ms` 包含块间历史搬移。计时只在块边界采样，无逐块日志。
+
+#### 2026-09-16 生成性能优化总结
+
+原实现先通过 `measureFilteredNoise()` 完整生成并滤波一次以测量均值/RMS，再重置相同seed，通过 `writeFilteredNoise()` 重复生成和滤波后量化。每个tap都对环形history取模。设复样点数为N，两遍65-tap I/Q滤波合计约260N次实数乘加，另外还有两遍Box–Muller的随机数、log/sqrt/sin/cos开销。125 MiB与1000 MiB分别对应32,768,000和262,144,000个复样点，原两遍FIR分别约85.2亿和681.6亿次实数乘加。
+
+当前优化由两部分组成：解析归一化消除整段统计重放；分块连续FIR消除内层取模，并通过多个独立输出累加改善编译器优化条件。固定seed、Box–Muller、65-tap Blackman-windowed sinc系数、截止频率及int16量化规则保留。未引入FFT、多线程、平台专用SIMD、fast-math或对称系数折叠；是否生成SIMD指令不能仅凭耗时判断。现有工作线程的过期任务取消协议未在本次修改。
+
+这次性能优化不以逐点兼容旧版为要求，验收关注频谱表现和实际平均功率。解析归一化不再消除有限记录的均值或强制校正样本RMS；短记录的统计波动属于已接受的语义变化。任何明显的带边退化或新增杂散都不能以提速或有限长度FIR为由接受。
+
+#### Windows Release 实测记录
+| Bandwidth | Length | 复样点数 | generation_ms | metrics_ms | 生成＋功率统计 |
+| --- | --- | ---: | ---: | ---: | ---: |
+| 40 MHz | 10 ms | 500,000 | 22.0793 | 0.2882 | 22.3675 ms |
+| 100 MHz | 10 ms | 1,250,000 | 56.9994 | 0.7132 | 57.7126 ms |
+| 100 MHz | 262.144 ms | 32,768,000 | 1439.08 | 19.0809 | 1458.1609 ms |
+
+最大125 MiB记录的阶段分布：
+
+| 阶段 | 耗时 | 占生成＋功率统计总时间 |
+| --- | ---: | ---: |
+| payload分配 | 20.5453 ms | 约1.4% |
+| 高斯随机数生成 | 701.114 ms | 约48.1% |
+| FIR、量化及历史搬移 | 717.119 ms | 约49.2% |
+| Core功率扫描 | 19.0809 ms | 约1.3% |
+
+三组每百万复样点的生成耗时约44.16、45.60、43.92 ms，生成吞吐约2200～2300万复样点/秒，当前观测与近似线性增长一致。优化后随机数和FIR/量化耗时接近，分配及功率扫描不是主要瓶颈。
+
+#### 频谱、带宽与RMS测量口径
+
+当前 `Bandwith` 是滤波器的名义总带宽：`makeLowPassTaps()` 将其一半作为窗口化sinc截止频率，并非厂商常见的严格“Flat Noise Bandwidth”定义。以100 MHz / 125 MSPS为例，按现有系数计算，±50 MHz处理论功率谱相对平台约为−6.02 dB。这是既有滤波器定义，本次优化未改变。平坦带宽、过渡带和带外抑制应分别理解，不能把中央部分平坦直接当作整个设定带宽的平坦度保证。
+
+UI RMS沿用共享功率口径，扫描最终int16 IQ后计算：
+
+```text
+UI RMS(dBm) = Level(dBm) + 10log10(mean(I² + Q²) / (2 × 32767²))
+```
+
+具体分量边界处理以Core helper为准。AWGN每分量理论RMS为0.2×32767，因此长记录的UI RMS通常约为Level−13.98 dB，但显示始终使用实际payload统计，不硬编码该偏移。
+
+频谱仪Channel Power只积分所设带宽内的功率，UI RMS对应整段IQ的总平均功率。对于100 MHz / 125 MSPS，按当前FIR的理论功率响应积分，±50 MHz内约包含99.56%的总功率，信道内功率仅比总功率低约0.019 dB；这是数字滤波器理论值，不包含有限记录、量化、射频链路或仪器误差。
+
+因此，在中心频率对齐、使用RMS检波/功率平均且仪器不过载时，积分带宽设为Bandwidth应有：
+
+```text
+Channel Power(dBm) + 线缆/外部衰减损耗(dB) ≈ UI RMS(dBm)
+```
+
+例如UI RMS为−13.98 dBm、线缆损耗0.5 dB时，100 MHz积分的理想读数约为−14.50 dBm。若补偿后仍存在数dB稳定差异，应检查功率参考、校准及测量设置，不能仅用FIR尾部解释。
+
+#### 频谱验收
+
+- 本次采用频域质量和功率一致性验收，不要求新旧IQ逐点一致。关注带内平均谱平坦、两侧带边合理且基本对称、带外抑制、无异常中心尖峰或新增杂散，以及Channel Power与UI RMS的对应关系。
+
+相关原理参考：[Keysight AWGN带宽与总/信道功率定义](https://helpfiles.keysight.com/csg/n5106a/awgn_settings.htm)、[Keysight噪声测量与功率平均](https://helpfiles.keysight.com/csg/89600B/Webhelp/Subsystems/powerspectrum/content/ps_noisemeasurements.htm)、[Keysight频谱仪Min Hold定义](https://helpfiles.keysight.com/csg/B_Series_FieldFox_WebHelp/Chapter_7_SA_%28Spectrum_Analyzer%29_Mode_%28Option_233%E2%80%93Mixed_Analyzers%29.htm)。
 
 ---
 

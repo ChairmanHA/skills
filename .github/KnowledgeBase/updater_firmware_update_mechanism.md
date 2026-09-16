@@ -90,6 +90,22 @@
 - 每个 `Firmware.Profiles[]` 使用 `PresentSelectorOptions` 声明一个精确选件组合，并携带一整组 `FPGA / MCU / BUS / EIO` 目标版本。运行时先把设备的完整选件集合与 `SelectorOptions` 求交集，再做精确匹配；不按 `Model` 选择，也不使用优先级或模糊规则。
 - 新格式只要存在就必须完整有效；schema 错误、重复组合或组件版本缺失会使整包解析失败，不能静默退回旧字段。
 
+### H2 选件命名空间过渡约定（2026-09-10）
+
+`Firmware.OptionNamespace` 用于校验包与设备选件编号属于同一体系。过渡版
+`PacketSpec::resolveFirmwareTarget()` 将 `harogic.h2` 与 `h2` 视为等价，设备快照与包清单
+可使用任一名称；其他命名空间仍按原有区分大小写的精确相等规则比较。
+
+当前 `package-info/version.json` 和 HTRA 的 `kH2OptionNamespace` 均继续使用
+`harogic.h2`，以便尚未安装过渡版、严格匹配旧名称的客户端仍可读取本阶段更新包。
+目标固件显示、Update 按钮门控和更新启动检查共用上述解析入口；Schema 2 必填校验、
+未知选件默认路径及 Profile 精确匹配规则不变。
+
+后续切换为 `h2` 前，先确保需要通过更新链升级的客户端已安装此过渡版，再同步修改
+包清单和 HTRA 上报常量。旧名称兼容的移除应在不再需要读取旧包后单独安排；
+不在本阶段切换名称或删除兼容。后续如配置了 `device_info.xml` 的 `optionNamespace`
+型号别名规则，也需核对其名称；该配置匹配不使用 Updater 的别名兼容逻辑。
+
 当前包的默认 FPGA 是 `2.0.20`；选件已知时，无 53 档显示 `2.0.14`，含 53 档显示 `2.0.19`。
 
 在线和本地文件都使用这套 `PacketSpec` 解压/解析契约；远端加载只有

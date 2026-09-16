@@ -165,6 +165,10 @@
 
 这使得主输入区和步长编辑区都能复用同一套 adapter 协议。
 
+Instrument 展示只改变这一层的视觉组织：`TouchNumKeyboard` 从创建时的 trigger/anchor 祖先继承最近的 `uiMode` 动态属性；当值为 `instrument` 时，标题和主输入框使用 24px；只有实际挂有 `EditableWidget`/`stepEdit` 时，Step 名称和步长数字才使用 24px，并把现有 box layout 切换为从左到右，使两者处于同一行。无 StepWidget 的键盘只放大标题和主输入框，标题标签保持紧凑高度。Main 模式继续使用原来的字号和上下布局。这个分支不替换 `stepEdit`，也不改变 focusProxy、receiver、快捷单位或提交链。
+
+样式边界补充（2026-09-14 真机反馈修正）：顶层 `Qt::Tool` 键盘仍以 anchor 为 parent，QSS 后代匹配不会在窗口边界停止。调制/Sweep 页的 `Core--Panel QPushButton` 曾误把键帽设为固定 64px/24px；CommonPanel 不继承 Core::Panel，所以外观不同。五行键帽缩短后，固定 570px 键盘中的多余空间进入标题和布局间隙，不能归因于是否存在 StepWidget。现用 `Controls--TouchNumKeyboard#TouchNumKeyboard[uiMode="instrument"] > .QPushButton` 明确覆盖：75px 内容最小高度、解除 64px 最大高度限制、22px 键帽字号（与 instrument CommonPanel 参考效果一致），其余颜色/边框/按下态继续来自主题。原 44px 标题高度补丁已移除。主输入框选择器必须包含 `#edit` 才能覆盖带 `#mainContent` 的通用 22px 字体规则。上述规则在 keyboard reparent 到 overlay 后仍以自身 `uiMode` 为准。
+
 ## 3. 组装层：`createKeyboardBase()` 如何把它们接起来
 
 实现文件：`src/libs/business/utils.cpp`

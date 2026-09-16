@@ -16,6 +16,14 @@ StepSweep 的前端预校验现在是一个独立于真实发射流水线的编�
 
 ## 设备侧边界
 
+### ListMode 型号能力（2026-09-15）
+
+- HTRA 的 model 122、123、132 不支持 ListMode/MScan。HTRA resolver 使用 open 后的真实 model 设置 `TxCarrierCapabilities::supportsListMode`；规则与带宽、高功率选件无关，其他型号保持支持。
+- `StepSweepPanel` 监听 `currentDeviceCapabilitiesChanged`，通过现有 `enumDisplayOptions` 绑定移除 ListMode 入口。若当前选中 List，先关闭 Sweep（沿用 `enabledChanged` 切回 Fixed），再显示 Freq；Freq/Power 的使能不受此规则影响。
+- 能力快照处理早于 `currentDeviceOpenStateChanged(true)`，因此进入 open 后 preview 前已退出不支持的 ListMode。
+- 离线允许编辑全部模式，切回支持设备会恢复 ListMode 入口，不自动恢复 Sweep 使能。
+- 已连接 F60 时恢复旧 List 配置或接收面板编辑状态，Sweep 保持关闭；恢复逻辑检查原始 SweepType，避免 enum 绑定回退后错误启用其他扫描模式。`TxSessionService::canSelectCarrierPlan()` 同时拒绝不支持的 MScan 请求。
+
 HTRA `FancyDevice::previewCarrierPlan()` 负责把统一的 carrier/common 语义收口到 H2 `tx_test_*` 系列 preview 接口。
 
 当前至少包括：

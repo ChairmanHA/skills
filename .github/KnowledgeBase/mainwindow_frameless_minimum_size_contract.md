@@ -98,6 +98,18 @@ Windows 下主窗口使用 frameless chrome：
 - `minimumSizeHint()`：Qt 当前布局给出的最小尺寸建议。
 - `ptMinTrackSize`：Windows 拖拽窗口时必须遵守的 native 最小尺寸。
 
+## 标题栏垂直带内的非标题栏控件命中
+
+instrument 模式的右侧 modulation dock 从 central-layout 的 `y=0` 开始，顶部浮动滚动按钮因此会落在自定义 TitleBar 的同一垂直命中带内。Win32 `WM_NCHITTEST` 不能只用 `TitleBar::childAt()` 判断该区域：右侧 dock 不属于 TitleBar 子树时，空结果会被误判为 `HTCAPTION`，按钮双击就会触发窗口最大化。
+
+当前 `MainWindowChromeWin` 在返回 `HTCAPTION` 前先检查主窗口在该命中点的实际子控件：
+
+- 命中 TitleBar 子树：沿用原有拖动/交互控件规则；
+- 命中 TitleBar 之外的真实子控件（包括 modulation overlay button）：返回 `HTCLIENT`，让 Qt 控件接收点击和双击；
+- 没有命中子控件：仍返回 `HTCAPTION`，保留空白标题栏拖动。
+
+这条修复只属于 Win32 native hit-test。aarch64 Wayland 的 instrument 拖动在 `TitleBar::mousePressEvent()` 中直接调用 `QWindow::startSystemMove()`，浮动按钮不在 TitleBar 子树且不会进入该拖动分支，因此不共享这个最大化风险；仍需在目标 Wayland 设备上做一次真实触摸/鼠标回归。
+
 不要把这三层混成一个问题。
 
 ## 后续维护检查清单

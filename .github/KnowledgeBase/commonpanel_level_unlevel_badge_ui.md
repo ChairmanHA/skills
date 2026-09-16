@@ -53,3 +53,17 @@
 所以要记住：
 
 `UNLEVEL` 现在是 `Level` 按钮的局部 badge 状态，不是状态栏 warning。
+
+## 5. Instrument 模式例外
+
+`ui-mode=instrument` 使用 1024x600 固定布局，Level 按钮采用独立的紧凑显示：
+
+- 2026-09-14 真机字体复核后，宽度固定为 `220px`，PEP/RMS 两行字体为 `24px`；该宽度用于容纳两位小数的 `PEP: -130.25dBm` / `RMS: -30.25dBm` 并保留少量取整余量；
+- 复用 `LabelButton` 的原生两行结构，上行显示 `PEP: <value>`，下行显示 `RMS: <value>`；
+- `infoLabel` 在 instrument 模式移除共享的额外左 margin，使 RMS 与 PEP 的文字起点一致；
+- 独立的 `rmsPower` 按钮继续隐藏；
+- `UNLEVEL` 状态仍由设备链路记录，但 badge 在 instrument 模式不显示，后续状态回写也不会重新显示它；
+- main 模式仍保留 `Level` 与 `RMS` 两个独立按钮，并继续按原规则显示 `UNLEVEL`。
+
+该差异由 `CommonPanel::setInstrumentLayout()` 和现有显示刷新函数控制，不通过全局
+LabelButton QSS 改造，因此不会影响 main 模式或其他 LabelButton。
