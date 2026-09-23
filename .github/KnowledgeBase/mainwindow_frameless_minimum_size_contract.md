@@ -1,6 +1,6 @@
 # MainWindow Frameless Minimum Size Contract（Windows）
 
-本文记录 Windows 无边框主窗口的最小尺寸约束问题：业务 panel 的 Qt 布局仍然能给出 `minimumSizeHint()`，但 native resize 没有使用这个值时，窗口仍可被系统拖到内容坍塌。
+本文记录 Windows 无边框主窗口的最小尺寸约束问题，以及迁移到 QWindowKit 后需要重新验证的运行时合约：业务 panel 的 Qt 布局仍然能给出 `minimumSizeHint()`，但 Windows native resize 是否采用这个值，取决于最终的 `WM_GETMINMAXINFO` 消息链路。
 
 Raspberry Pi Wayland 固定全屏下还有相反方向的合同：所有 stacked panel 汇总后的 Qt 最小高度不能超过 native surface。Quick Waveform 隐藏页曾把主窗口抬到 `805px`，导致 `800px` 输出截断状态栏。详见 [MainWindow Panel 最小高度与 Wayland 全屏边界](mainwindow_panel_minimum_height_wayland_contract.md)。
 
@@ -8,83 +8,27 @@ Raspberry Pi Wayland 固定全屏下还有相反方向的合同：所有 stacked
 
 OFDM 页面在主窗口中被缩到过小时，内容会明显坍塌：
 
-- 最小高度原本应由 OFDM panel 的多行控件和布局决定。
+- 最小高度原本应由 QuickWaveform panel 的多行控件和布局决定。
 - 最小宽度原本主要由 OFDM 行内两个 `SwitchButton` 决定。
 - 出问题后，窗口可以继续被拖小，`SwitchButton`、`LabelButton` 和两列布局被压到不可用状态。
 
-在当前这次定位中，问题出在主窗口的 Windows frameless native resize 合约。
+历史问题出在主窗口的 Windows frameless native resize 合约。2026-09-18 迁移到 QWindowKit 后，SGStudio 已移除自己的消息拦截,测试已经通过；
 
-## 关键事实
 
-### 1. OFDM panel 没有显式最小尺寸
 
-`src/plugins/analog/ofdmpanel.ui` 没有给 panel 写死 `minimumSize`。
+## QWindowKit 迁移后的当前状态
 
-旧行为能保持最小尺寸，是因为 Qt 布局会从子控件递推出当前页面的 `minimumSizeHint()`。例如：
+2026-09-18 的 Win32 迁移删除了 `MainWindowChromeWin`，当前边界是：
 
-- 全局 QSS 中普通 `SwitchButton QPushButton` 有 `min-width: 72px`。
-- OFDM 的 `btnNullDC` 和 `btnWindowed` 位于同一行，各自包含 On/Off 两个子按钮。
-- 因此这一行会成为 OFDM 页面横向最小尺寸的重要来源。
+- `MainWindow` 在 Windows 下创建并持有 `QWK::WidgetWindowAgent`。
+- QWindowKit 接管 native frame、resize/caption hit-test、系统按钮命中、DPI 与窗口过程生命周期。
+- `MainWindow` 不再设置 `Qt::FramelessWindowHint`，也不再覆写 `nativeEvent()`。
+- SGStudio 不再处理 `WM_GETMINMAXINFO`，历史 `ptMinTrackSize` 和 `ptMax*` 写入均已移除。
+- QWindowKit 1.5.1 自身不处理 `WM_GETMINMAXINFO`；未处理消息会继续交给 Qt 原窗口过程。
 
-### 2. `minimumSizeHint()` 语义
+因此当前不是“确认不需要最小尺寸合约”，而是有意恢复 Qt 默认消息链路后等待测试。必须在 OFDM 等布局较重的页面拖动到最小尺寸，观察 Windows 是否停在实时 `minimumSizeHint()` 边界。
 
-语义分工是：
-
-- `minimumSizeHint()`：Qt 根据 widget/layout/style 当前状态给出的建议最小尺寸。
-- `setMinimumSize()`：显式写死某个 widget 的最小尺寸。
-- Windows `MINMAXINFO::ptMinTrackSize`：native 拖拽时系统允许窗口缩到的最小 track size。
-
-本次修复没有调用 `setMinimumSize()`，也没有“设置 minimumSizeHint”。它是读取 Qt 当前布局算出的 `minimumSizeHint()`，再把这个结果写入 Win32 的 `ptMinTrackSize`。
-
-### 3. Frameless 主窗口接管了 native resize
-
-Windows 下主窗口使用 frameless chrome：
-
-- `MainWindow` 设置 `Qt::FramelessWindowHint`。
-- `MainWindowChromeWin` 处理 `WM_NCCALCSIZE`、`WM_NCHITTEST`、`WM_GETMINMAXINFO` 等 Win32 消息。
-- 一旦 `WM_GETMINMAXINFO` 被应用接管，系统拖拽边界就不能只假设 Qt 顶层布局会自动限制住窗口。
-
-旧代码在 `MainWindowChromeWin::handleGetMinMaxInfo()` 中处理了最大化工作区：
-
-- `ptMaxPosition`
-- `ptMaxSize`
-- `ptMaxTrackSize`
-
-但没有写 `ptMinTrackSize`。这使得 native resize loop 可以把 frameless 主窗口拖到小于 Qt 当前内容最小 hint 的尺寸。
-
-## 根因
-
-根因不是 OFDM 没有写死尺寸，也不是需要新增 `setMinimumSizeHint()`。
-
-根因是：
-
-1. 当前主窗口是 Windows frameless 窗口。
-2. 应用处理了 `WM_GETMINMAXINFO`。
-3. 该处理路径没有把 Qt 当前布局的最小尺寸同步到 `MINMAXINFO::ptMinTrackSize`。
-4. Windows 原生拖拽因此可以继续缩小窗口。
-5. Qt 布局被迫在小于自身有效最小尺寸的空间内布局，最终表现为业务 panel 坍塌。
-
-这类问题的典型信号是：
-
-- 页面内部控件仍有合理的 `minimumSizeHint()` 来源。
-- 手动拖拽窗口时，顶层窗口却能突破这个边界。
-- 问题集中出现在 frameless/nativeEvent 自定义窗口上。
-
-## 当前修复
-
-当前修复位于：
-
-- `src/plugins/core/mainwindowchrome_win.cpp`
-
-实现策略：
-
-1. 在 `WM_GETMINMAXINFO` 处理期间激活当前 Qt 布局。
-2. 读取 `window->minimumSize().expandedTo(window->minimumSizeHint())`。
-3. 用当前 `devicePixelRatioF()` 转换为 native 像素。
-4. 写入 `MINMAXINFO::ptMinTrackSize`。
-5. 保留既有最大化工作区处理。
-
-这等价于把 Qt 布局系统的当前最小尺寸，翻译给 Windows 原生 resize 系统。
+如果测试仍允许内容坍塌，后续只增加一个聚焦的最小 track-size 适配器：读取实时 `minimumSize().expandedTo(minimumSizeHint())`，按当前 DPI 转换后只写 `ptMinTrackSize`。不要恢复已由 QWindowKit 接管的 `WM_NCCALCSIZE`、`WM_NCHITTEST`、DWM、DPI、monitor 或 frame-refresh 代码，也不要重新写入 `ptMax*`。
 
 ## 与 minibar compact 的关系
 
@@ -96,19 +40,21 @@ Windows 下主窗口使用 frameless chrome：
 
 - `SwitchButton::compactMode`：控件级/host 侧紧凑视觉适配。
 - `minimumSizeHint()`：Qt 当前布局给出的最小尺寸建议。
-- `ptMinTrackSize`：Windows 拖拽窗口时必须遵守的 native 最小尺寸。
+- `ptMinTrackSize`：如果 Qt 默认链路不能落实当前布局 hint，SGStudio 聚焦适配器需要补齐的 native 最小尺寸。
 
 ## 标题栏垂直带内的非标题栏控件命中
 
 instrument 模式的右侧 modulation dock 从 central-layout 的 `y=0` 开始，顶部浮动滚动按钮因此会落在自定义 TitleBar 的同一垂直命中带内。Win32 `WM_NCHITTEST` 不能只用 `TitleBar::childAt()` 判断该区域：右侧 dock 不属于 TitleBar 子树时，空结果会被误判为 `HTCAPTION`，按钮双击就会触发窗口最大化。
 
-当前 `MainWindowChromeWin` 在返回 `HTCAPTION` 前先检查主窗口在该命中点的实际子控件：
+迁移后由 QWindowKit 负责标题栏 hit-test。SGStudio 负责声明哪些现有控件必须保持 client input：
 
-- 命中 TitleBar 子树：沿用原有拖动/交互控件规则；
-- 命中 TitleBar 之外的真实子控件（包括 modulation overlay button）：返回 `HTCLIENT`，让 Qt 控件接收点击和双击；
-- 没有命中子控件：仍返回 `HTCAPTION`，保留空白标题栏拖动。
+- TitleBar 内的 menu bar；
+- TitleBar 内的 output-mode action group；
+- 不属于 TitleBar 子树、但顶部会与标题栏垂直带重叠的 modulation dock。
 
-这条修复只属于 Win32 native hit-test。aarch64 Wayland 的 instrument 拖动在 `TitleBar::mousePressEvent()` 中直接调用 `QWindow::startSystemMove()`，浮动按钮不在 TitleBar 子树且不会进入该拖动分支，因此不共享这个最大化风险；仍需在目标 Wayland 设备上做一次真实触摸/鼠标回归。
+这些 widget 通过 `WidgetWindowAgent::setHitTestVisible()` 注册；未被注册的 TitleBar 空白仍由 QWindowKit 作为可拖动区域处理。最小化、最大化和关闭按钮则通过 `setSystemButton()` 注册，在保留 SGStudio 原有 click 行为的同时获得系统按钮命中语义。这套注册由 Windows 与 Linux x86_64 共用。
+
+Linux x86_64 在 Qt 5.15 下由 QWindowKit 通用 `QtWindowContext` 调用 Qt 的 system move/resize API，同时仍显式保留 `1280x800` 产品最小尺寸。固定全屏的 aarch64 Wayland 路径不使用该 agent。Windows、x86_64 X11 和 aarch64 Wayland 仍应分别在目标设备上做真实触摸/鼠标回归。
 
 不要把这三层混成一个问题。
 
@@ -116,16 +62,19 @@ instrument 模式的右侧 modulation dock 从 central-layout 的 `y=0` 开始�
 
 修改主窗口尺寸、frameless chrome、业务 panel 布局或 `SwitchButton` 样式时，至少检查：
 
-- `MainWindowChromeWin::handleGetMinMaxInfo()` 是否仍写入 `ptMinTrackSize`。
-- 写入值是否来自当前 Qt 布局，而不是过期缓存。
-- DPI 转换是否仍用当前窗口的 `devicePixelRatioF()`。
-- 最大化工作区逻辑是否仍只负责 `ptMax*`，不要覆盖最小 track size。
-- 新增业务 panel 如果有特殊尺寸需求，优先确认其 `minimumSizeHint()` 是否合理，再看顶层 native resize 是否尊重它。
+- QWindowKit agent 是否仍在窗口早期完成 `setup()`，且每个受支持的桌面主窗口只有一个 chrome owner。
+- TitleBar、三个系统按钮、menu bar、output-mode widget 和 modulation dock 是否仍正确注册。
+- 新增业务 panel 如果有特殊尺寸需求，先确认其 `minimumSizeHint()` 是否合理，再在 Windows native resize 中实测是否被遵守。
+- 若已经因为测试失败加入聚焦的 `WM_GETMINMAXINFO` 适配器，确认它只写 `ptMinTrackSize`，值来自当前 Qt 布局而不是缓存，DPI 转换使用当前窗口倍率。
+- 不要在 SGStudio 中重新实现 QWindowKit 已负责的 frame、hit-test、DWM、DPI、monitor 或 refresh 分支。
 
 ## 相关文件
 
-- `src/plugins/core/mainwindowchrome_win.cpp`
 - `src/plugins/core/mainwindow.cpp`
+- `src/plugins/core/titlebar.cpp`
+- `3rdParty/qwindowkit/src/widgets/widgetwindowagent.cpp`
+- `3rdParty/qwindowkit/src/core/contexts/win32windowcontext.cpp`
+- `3rdParty/qwindowkit/src/core/contexts/qtwindowcontext.cpp`
 - `src/plugins/analog/ofdmpanel.ui`
 - `src/libs/controls/switchbutton.cpp`
 - `configuration/theme.css`

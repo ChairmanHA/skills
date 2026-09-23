@@ -123,7 +123,7 @@ Get-Content -Encoding UTF8 -LiteralPath "$kb\listmode_scpi调试指南.md" | Sel
 - [Auto Mod 用户意图](auto_mod_user_intent_boundary.md)：FancyTabWidget 信号与 MOD availability。
 - [调制列表响应式布局](fancytabwidget_modulation_list_responsive_layout.md)：单/双列、宽度与滚动条。
 - [TitleBar 菜单与溢出](titlebar_menubar_outputmode_and_overflow_behavior.md)：输出模式、工具组、重复触摸。
-- [Windows 主窗最小尺寸](mainwindow_frameless_minimum_size_contract.md)：native resize 与 minimumSizeHint。
+- [Windows 主窗最小尺寸](mainwindow_frameless_minimum_size_contract.md)：QWindowKit 委托、native resize 与 `minimumSizeHint()` 运行时合约。
 - [Wayland Panel 高度与启动时序坑](mainwindow_panel_minimum_height_wayland_contract.md)：延迟 show、隐藏窗口临时几何、发行版 Qt 与自带标准 Qt 的补丁差异、Wayland 全屏状态栏裁切。
 - [High DPI 入口](high_dpi_development_practices.md)：Qt5 缩放、资源倍率、多屏拖动。
 - [多屏 popup 几何](multiscreen_popup_geometry_and_screen_topology.md)：屏幕断开、DPI、EnumTextButton / ComboBox / QMenu。
@@ -162,7 +162,7 @@ Get-Content -Encoding UTF8 -LiteralPath "$kb\listmode_scpi调试指南.md" | Sel
 
 - [入口：Linux 构建发布](linux_build_package_unified_entry.md)：250 / 108 两入口、Raspberry Pi / RK3588 共用包、直接启动。
 - [AArch64 兼容性](raspberry_pi_132_build_host_250_compatibility.md)：ABI、Qt、Wayland/xcb 与双目标验收。
-- [x86_64 X11 与 Wayland 迁移方案](linux_x86_64_x11_and_future_labwc_wayland.md)：当前 xcb 边界、未来 labwc artifact。
+- [x86_64 X11 与 Wayland 迁移方案](linux_x86_64_x11_and_future_labwc_wayland.md)：当前 xcb/QWindowKit 主窗边界、未来 labwc artifact。
 - [RPATH](RPATH_MECHANISM.md)：$ORIGIN 相对库路径。
 - [VMware 直连树莓派](ubuntu18_vmware_raspberry_pi_bridge_setup.md)：Ubuntu18、NAT + 桥接、静态地址与回滚。
 

@@ -81,6 +81,13 @@ GNSS 现在确实放进了 `CommonDeviceProfile`，但它承担的是“缓存 o
 - 订阅 `DeviceRealTimeStatus` 属性并刷新经纬度、海拔、卫星数、SNR、日期时间。
 - 时间格式支持 Local / UTC 切换。
 
+### Instrument 布局
+
+- GPS 插件从主窗口 `mainContent.uiMode` 获取启动展示模式，并在创建 `GpsInfoDialog` 时显式传入；顶层对话框不依赖 `mainContent` 后代选择器隐式继承 instrument 样式。
+- Main 模式保留原单列表单；Instrument 模式把配置/时间与 GNSS 状态重排为两列、每列最多 7 行，状态提示横跨底部。
+- Instrument 内容宽度为 860px，单行控件高 52px，标签/值字号分别为 22px/23px；按共享 35px 标题栏计算，静态总高约 527px，可放入 1024x600 主窗口。
+- 68px 是主页面双行参数按钮规格，不适用于本对话框的单行表单；GPS light/dark QSS 使用 `GpsInfoDialog[uiMode="instrument"]` 独立限定其字号、开关与下拉项尺寸。
+
 ### 配置面
 
 - `antenna`、`xpps_onoff`、`xpps` 发生编辑后调用 `applyGnssConfig()`。

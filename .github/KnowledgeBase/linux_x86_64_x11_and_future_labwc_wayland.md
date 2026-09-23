@@ -23,6 +23,24 @@ aarch64 Raspberry Pi 的 Wayland/layer-shell 发布路径。
 LayerShellQt 是否需要与 CPU 架构无关。当前关闭它，是因为 x86_64 目标
 明确选择 X11，而不是因为 x86_64 本身不支持 layer-shell。
 
+## x86_64 主窗口无边框实现
+
+Linux x86_64 主窗口使用 vendored QWindowKit `WidgetWindowAgent`，不再维护
+SGStudio 自己的 `MainWindowChromeX11`。在当前 Qt 5.15 构建中，QWindowKit
+选择通用 `QtWindowContext`；Qt 6 才会选择 native `LinuxX11Context`。通用
+context 已通过 Qt/xcb 提供当前产品需要的行为：
+
+- 设置和维护 `Qt::FramelessWindowHint`；
+- 标题栏空白拖动、双击最大化/还原；
+- 四边和四角的 system resize 与光标切换；
+- WinId 重建后的 context 刷新；
+- 用 system-button 和 hit-test-visible 注册排除标题栏交互控件。
+
+SGStudio 仍负责 Linux x86_64 的产品策略：主窗口最小尺寸固定为
+`1280x800`；最小化/最大化按钮保持可见；menu bar、output-mode action
+group、三个系统按钮和 modulation dock 注册给 agent；窗口状态变化后刷新
+TitleBar 最大化图标。aarch64 Wayland/full-screen 路径不创建该 agent。
+
 ## 没有 LayerShellQt 时的 Minibar 行为
 
 `SGStudioMiniBar` 仍会被构建。CMake 只在 `LayerShellQt::Interface` 存在时
@@ -181,7 +199,7 @@ wayland”调用 `useLayerShell()`；它没有先确认 compositor 协议能力�
    当前最内层对象。
 5. QMenu、EnumTextButton popup 首次和重复打开都位置正确。
 6. 数字键盘不会被 Minibar client area 裁剪，关闭顺序正确。
-7. 多屏、屏幕边缘、1280x800、窗口重开和 helper 断连/重启均通过。
+7. 多屏、QWindowKit 屏幕边缘缩放、1280x800、窗口重开和 helper 断连/重启均通过。
 8. 主进程仍使用普通 xdg-shell；只有 helper 使用 layer-shell。
 
 更深入的 surface、visual geometry、popup 和 overlay 排障规则见

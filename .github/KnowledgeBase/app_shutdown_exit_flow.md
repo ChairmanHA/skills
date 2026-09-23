@@ -1,6 +1,6 @@
 # SGStudio 程序关闭到进程退出的全流程（含易死锁点与解决方案）
 
-更新时间：2026-01-15
+更新时间：2026-09-17
 
 本文总结 SGStudio（Qt 5 + 插件驱动）从“用户触发关闭”到“进程真正退出”的完整链路，并标注容易卡死/死锁的位置与当前已落地的修复策略。
 
@@ -102,6 +102,24 @@ CorePlugin 析构会删除 MainWindow，MainWindow（及其 QObject 子对象）
 - **根因**：线程未 running 没有事件循环，BlockingQueuedConnection 永远等不到执行。
 - **解决方案（已落地）**：只有在 `statusUpdateThread->isRunning()` 时才使用 blocking stop。
 
+### 3.4 SCPI Parser worker 与 GUI 线程退出互等（已修复）
+
+- **症状**：窗口全部消失后 `SGStudio.exe` 仍驻留后台；退出日志停在某个插件 `Delete ... OK` 之后，没有 `Delete SCPI OK`。
+- **复现条件**：SCPI 服务开启，客户端以高频率持续查询；现场使用每 2 ms 同时查询 Center 和 Level，可稳定命中退出窗口。
+- **已确认死锁链**：
+  1. TCP `readyRead` 把命令交给 Parser worker。
+  2. worker 执行产品命令时通过 `Qt::BlockingQueuedConnection` 等待 GUI 线程。
+  3. GUI 线程已进入 `aboutToQuit -> PluginManager::shutdown()`，无法处理该 blocking invocation。
+  4. Delete 阶段进入 `~Parser()`，GUI 线程无限期 `wait()` worker；worker 继续等待 GUI 线程，形成双向等待。
+- **根因判断**：worker 不承担独立计算；所有产品 handler 最终仍回到 GUI 线程执行。该 worker 只增加了跨线程阻塞和析构 join，并未提供有效并行性。问题与 Win32 API 无关。
+- **解决方案（2026-09-17 已落地）**：
+  - 删除 Parser worker、mutex、condition variable、interruption 和析构 `wait()`。
+  - TCP/Parser/产品 handler 在 GUI 线程同步执行；Parser 用 FIFO 和 `mDraining` 保持顺序，并防止嵌套事件循环递归进入 libscpi。
+  - `Parser::stop()` 停止接收并清空重入期间积压的命令；重新 `init()` 时恢复接收。
+  - 删除 `scpiregister.cpp` 普通命令和 List 命令的 `BlockingQueuedConnection` 包装。
+- **现场验证**：新版在 2 ms Center/Level 持续轮询下执行退出，用户确认进程正常结束，未再变成后台驻留进程。
+- **配套 UI 收口**：`SCPIDialog` 每 50 ms 合并追加一次命令日志，pending 和显示文档均限制为 5000 行，避免高频查询把死锁修复转化为 UI 事件洪泛或无界内存增长。
+
 ---
 
 ## 4. 当前落地的关键修复点（面向维护）
@@ -112,5 +130,7 @@ CorePlugin 析构会删除 MainWindow，MainWindow（及其 QObject 子对象）
   - 线程未运行时不能做 BlockingQueuedConnection
   - 同线程调用不能做 BlockingQueuedConnection
   - 仅停止 timer 不足以保证退出，必要时应退出线程事件循环
+- **SCPI Parser**：命令在 transport/GUI 线程按 FIFO 串行执行；退出阶段禁止重新引入“worker blocking 回 GUI + GUI join worker”的互等结构。
+- **SCPIDialog 日志**：50 ms 批量刷新，最多保留 5000 行；高频协议流量不得逐条创建 UI queued event。
 
 ---

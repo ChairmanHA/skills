@@ -1,6 +1,6 @@
 # SCPI 接入静态审阅与当前收口方案
 
-日期：2026-08-14
+日期：2026-09-17
 ## 结论
 
 当前 SCPI 接入已经具备可复用的 parser / transport 基础，但产品集成层仍主要是“SCPI 远程驱动 UI + 写 Property”的过渡实现，而不是稳定的仪器控制服务。
@@ -36,11 +36,26 @@ SCPI 基础设施本身方向是合理的：
 
 - 使用成熟 SCPI parser，而不是手写协议 parser。
 - `src/libs/scpi` 与 `src/plugins/scpi` 分层，transport/parser 没有直接放进业务插件。
-- parser worker 队列串行处理命令。
-- 触碰 Qt object 前通过 `QMetaObject::invokeMethod(..., Qt::BlockingQueuedConnection)` 切回 GUI 线程。
+- TCP transport、Parser 和当前产品 handler 在 GUI 线程执行；Parser FIFO 保持命令顺序，`mDraining` 防止嵌套事件循环递归进入共享 libscpi context。
+- `Parser::stop()` 拒绝新命令并清空重入期间的待处理队列，析构路径不再等待 SCPI worker。
 - `SCPIDialog` 作为启停和日志入口可以保留，但它不应成为命令行为 owner。
 
 这些优点不要求保留 UI 自动化式命令实现。长期稳定形态仍应把命令映射到 UI 无关的 intent/service。
+
+## 2026-09-17 已落地：退出死锁与日志洪泛收口
+
+现场日志确认旧实现存在确定死锁：Parser worker 在产品命令的 `BlockingQueuedConnection` 上等待 GUI 线程；GUI 线程同步执行插件 shutdown，并在 `~Parser()` 中无限期等待 worker。窗口已关闭但主进程无法结束。2 ms Center/Level 轮询可以稳定保证退出瞬间存在在途命令并复现。
+
+当前实现已做以下收口：
+
+- 删除 Parser worker、mutex、condition variable、interruption 和析构 `wait()`。
+- `pushCommand()` 在 transport/GUI 线程用 FIFO 同步排空；`mDraining` 使嵌套事件循环只能入队，不能递归解析。
+- 普通 get/set 命令与 List 命令直接调用 handler，不再使用 `BlockingQueuedConnection`。
+- `ScpiEngine::stop()` 先停止 Parser 接收并清空待处理队列，再关闭 transport；服务重新启动时 `init()` 恢复接收。
+- socket reply 仍通过带 `QPointer` 的 queued invocation 写回，保持连接生命周期安全；它不参与 blocking wait。
+- `SCPIDialog` 把命令/响应日志暂存并每 50 ms 合并为一次 `append()`；pending 和文档均最多保留 5000 行，Clear 同时清空两者。
+
+验证边界：代码侧完成静态搜索和 diff 检查；用户在更新后的程序上保持 2 ms Center/Level 轮询并执行退出，确认进程正常结束、未再驻留后台。该结果是现场运行验证，不等价于全部 SCPI 命令族的功能回归。
 
 ## 当前仍存在的问题
 
@@ -110,11 +125,11 @@ SCPI 基础设施本身方向是合理的：
 
 观察：
 
-`onReset()` 触发 `ACTION_PRESET`。SCPI worker 通过 `Qt::BlockingQueuedConnection` 等待 GUI 线程执行 handler。
+`onReset()` 触发 `ACTION_PRESET`。当前 handler 直接在 GUI 线程执行；如果 Preset 打开模态确认框，当前 SCPI 命令仍要等用户结束该交互后才能完成。
 
 风险：
 
-- 如果 Preset 触发模态确认框，SCPI worker 会阻塞直到用户点击。
+- 如果 Preset 触发模态确认框，协议命令会被 UI 交互延迟到用户点击之后。
 - 自动化环境下这会表现为命令卡死。
 
 建议：
@@ -288,6 +303,7 @@ Step C：调制业务命令
 8. 插件 metadata 是否声明真实依赖？
 9. TCP bind address、安全提示、端口持久化是否符合产品定位？
 10. 第三方依赖是否说明了构建使用范围和许可证来源？
+11. SCPI 路径是否重新引入了 worker blocking 回 GUI、析构 join worker 或逐条 UI 日志事件？
 
 ## 底线
 
