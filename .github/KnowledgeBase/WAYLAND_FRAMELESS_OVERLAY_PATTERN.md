@@ -196,7 +196,32 @@ Wayland 的核心原则之一是：**顶层 surface 的屏幕位置由 composito
 
 ---
 
-## 6. 非模态 About 页的窄例外（2026-07）
+## 6. Hosted 数字键盘与全局外部点击过滤器（2026-09）
+
+`MousePressEater` 安装在 `qApp` 上，它先于具体 widget 的事件处理运行。即使
+`OverlayContainer` 能阻挡下层控件，业务注册的全局监听仍然能够看到键盘上的鼠标事件。
+因此，全局监听不能仅凭“坐标在自己的对话框矩形之外”就关闭下层对话框。
+
+List Mode 的 Insert / Fill 曾使用 `topLevelWidgets()` + `Qt::Popup` 判断是否有输入
+弹窗。Wayland 下 `TouchNumKeyboard` 已转换为 overlay 内的 `Qt::Widget`，这个检查漏掉
+了它。键盘拖出固定 800px 宽的 EditDialog 边界后，点击会被该过滤器吞掉，松开时关闭
+EditDialog；随后 `finished` 的回调将外层 Edit List Mode Data 窗口置顶，盖住仍未关闭的
+键盘。用户报告的“单位按钮位于右侧功能列上方时消失、关闭外层后又看到键盘”与此代码
+路径一致；无需下层按钮收到 `clicked` 就可发生。此结论来自静态调用链，修复后的树莓派
+实测仍需执行。
+
+当前 ListModePanel 的局部外部点击规则：
+
+- 从全部 widgets 识别可见的 `TouchNumKeyboard`，同时保留原有 Popup 检查；键盘自身和
+  遮罩的点击由键盘处理，下层对话框不拦截。
+- 配对按下与松开：只允许在“按下时没有输入弹窗、且位于 EditDialog 外部”的序列结束时
+  关闭；松开时仍须在外部且没有输入弹窗。这样键盘在 outside press 时关闭后，同一序列
+  的 release 不会继续关闭下层。
+- 不通过再次 `raise()` 键盘或禁用右侧按钮补偿错误的事件处理。
+
+Qt 的事件过滤器顺序见 [Qt 5 Event Filters](https://doc.qt.io/archives/qt-5.15/eventsandfilters.html#event-filters)。
+
+## 7. 非模态 About 页的窄例外（2026-07）
 
 `AboutDialog` 使用 `Controls::Dialog::runAsShow()`，产品语义是非模态：用户打开
 About 后仍可操作 MainWindow。因此它在 Wayland 下只复用本文的“hosted child +

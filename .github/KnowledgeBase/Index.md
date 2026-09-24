@@ -71,6 +71,7 @@ Get-Content -Encoding UTF8 -LiteralPath "$kb\listmode_scpi调试指南.md" | Sel
 - [设备能力参数策略](playback_waveform_parameter_capability_policy.md)：OPTION_BW_320M_TX、400 MSPS 与参数决策目标。
 - [产品参数决策矩阵](playback_parameter_product_decision_matrix.md)：无/有选件对比、待实现与待确认项。
 - [ARB 模式入口](arb_mode_summary.md)：Ordinary / IQS / ProgrammedArb 解析与 runtime 边界。
+- [AWG、LF 链路与模型 B0](awg_model_b0_lf_chain_and_waveform_processing.md)：AWG 本质、RF/LF 边界、固定采样缓冲契约、全波形处理及 B0 参数界面归属。
 - [OrdinaryWav 截取与周期](arb_ordinary_wav_slice_period_semantics.md)：sampleOffset / samplesToUse / period。
 - [大波形内存与下载](large_waveform_streaming_plan.md)：payload 驻留、125/1000 MiB、租约与下载后释放。
 - [Digital 大波形汇报](digital_large_waveform_status_summary.md)：截断播放与完整保存的阶段总结。
@@ -78,7 +79,6 @@ Get-Content -Encoding UTF8 -LiteralPath "$kb\listmode_scpi调试指南.md" | Sel
 - [IQS-WAV 格式参考](IQS-WAV文件格式说明.md)：录制文件、trig / prof MsgPack，区别于 Save IQ。
 
 ## D-waveform
-
 - [Digital 交互入口](digital_modulation_user_interaction_flow.md)：SPS、异步生成、截断、reset、保存。
 - [Multitone 算法入口](htra_multitone_current_algorithm_and_vsg60_boundaries.md)：tone / notch / phase / AutoScale / preview。
 - [Multitone 与 VSG60 对比](multitone_vsg60_three_case_comparison_and_playback_consistency.md)：三组样本与 Playback 一致性。
@@ -122,8 +122,9 @@ Get-Content -Encoding UTF8 -LiteralPath "$kb\listmode_scpi调试指南.md" | Sel
 - [Level UNLEVEL badge](commonpanel_level_unlevel_badge_ui.md)：CommonPanel 局部标记。
 - [Auto Mod 用户意图](auto_mod_user_intent_boundary.md)：FancyTabWidget 信号与 MOD availability。
 - [调制列表响应式布局](fancytabwidget_modulation_list_responsive_layout.md)：单/双列、宽度与滚动条。
-- [TitleBar 菜单与溢出](titlebar_menubar_outputmode_and_overflow_behavior.md)：输出模式、工具组、重复触摸。
-- [Windows 主窗最小尺寸](mainwindow_frameless_minimum_size_contract.md)：QWindowKit 委托、native resize 与 `minimumSizeHint()` 运行时合约。
+- [TitleBar 菜单与溢出](titlebar_menubar_outputmode_and_overflow_behavior.md)：central grid 接入、输出模式、工具组、重复触摸。
+- [Instrument 窗口平台行为](instrument_ui_mode_platform_window_behavior.md)：QWindowKit 归属、Linux x86_64 非目标范围与 aarch64 Wayland 1024×600 非全屏合同。
+- [Windows 主窗最小尺寸](mainwindow_frameless_minimum_size_contract.md)：QWindowKit 迁移后暴露的 List Sweep 隐藏布局缓存、标题栏宽度汇总与 native resize 合约。
 - [Wayland Panel 高度与启动时序坑](mainwindow_panel_minimum_height_wayland_contract.md)：延迟 show、隐藏窗口临时几何、发行版 Qt 与自带标准 Qt 的补丁差异、Wayland 全屏状态栏裁切。
 - [High DPI 入口](high_dpi_development_practices.md)：Qt5 缩放、资源倍率、多屏拖动。
 - [多屏 popup 几何](multiscreen_popup_geometry_and_screen_topology.md)：屏幕断开、DPI、EnumTextButton / ComboBox / QMenu。
@@ -131,7 +132,7 @@ Get-Content -Encoding UTF8 -LiteralPath "$kb\listmode_scpi调试指南.md" | Sel
 - [设备状态 UI 反馈](device_status_ui_feedback.md)：error / warning 去重与 Minibar 例外。
 - [MessageDialog](messagedialog_design.md)：交互、hosted 层级与提示边界。
 - [NotificationPopup](controls_notification_popup.md)：非模态通知、动画、定位与自动关闭。
-- [Wayland 无边框弹窗](WAYLAND_FRAMELESS_OVERLAY_PATTERN.md)：overlay 与遮罩模式。
+- [Wayland 无边框弹窗](WAYLAND_FRAMELESS_OVERLAY_PATTERN.md)：overlay 与遮罩模式、List Mode 数字键盘与全局外部点击边界。
 - [Wayland 嵌套模态排障](wayland_nested_modal_dialog_issue_record.md)：弹窗消失、输入阻塞与工程决策。
 
 ## I-input-pitfalls

@@ -26,9 +26,41 @@ OFDM 页面在主窗口中被缩到过小时，内容会明显坍塌：
 - SGStudio 不再处理 `WM_GETMINMAXINFO`，历史 `ptMinTrackSize` 和 `ptMax*` 写入均已移除。
 - QWindowKit 1.5.1 自身不处理 `WM_GETMINMAXINFO`；未处理消息会继续交给 Qt 原窗口过程。
 
-因此当前不是“确认不需要最小尺寸合约”，而是有意恢复 Qt 默认消息链路后等待测试。必须在 OFDM 等布局较重的页面拖动到最小尺寸，观察 Windows 是否停在实时 `minimumSizeHint()` 边界。
+### QWindowKit 与本次回归的因果边界
 
-如果测试仍允许内容坍塌，后续只增加一个聚焦的最小 track-size 适配器：读取实时 `minimumSize().expandedTo(minimumSizeHint())`，按当前 DPI 转换后只写 `ptMinTrackSize`。不要恢复已由 QWindowKit 接管的 `WM_NCCALCSIZE`、`WM_NCHITTEST`、DWM、DPI、monitor 或 frame-refresh 代码，也不要重新写入 `ptMax*`。
+用户观察到问题是在引入 QWindowKit 后出现，这个时间关联成立，但不能表述为“QWindowKit 改写了 ListModePanel 的 `sizeHint()`”。迁移提交 `af5d6b71` 对扫描页、`ListModePanel`、`TitleBar.ui` 和 `layout()->setMenuBar(m_titleBar)` 没有改动；QWindowKit 源码也没有 `WM_GETMINMAXINFO` 或业务 panel `minimumSizeHint()` 的实现。
+
+迁移前，SGStudio 自己的 `MainWindowChromeWin::handleGetMinMaxInfo()` 每次收到 Windows 最小跟踪尺寸请求时，会显式执行：
+
+```text
+MainWindow layout.activate()
+centralWidget layout.activate()
+window.minimumSize().expandedTo(window.minimumSizeHint())
+→ 写入 ptMinTrackSize
+```
+
+迁移后，`nativeEvent()` 和这段 SGStudio 消息适配被删除，窗口交给 QWindowKit/Qt 默认消息链路。于是原本隐藏页面的延迟布局刷新不再被 SGStudio 的 native 适配器在拖动过程中主动“顺便”激活。首次显示 ListModePanel 时，Qt 才按正常 QWidget 显示流程激活隐藏页面及其嵌套布局，暴露出 `669x23 → 523x60` 的真实缓存更新。
+
+所以更准确的结论是：**QWindowKit 没有改变按钮或列表页的尺寸计算公式，而是改变了最小尺寸约束的执行边界，暴露了原有隐藏布局缓存与标题栏宽度未汇总的问题。** 原来的 `setMenuBar()` 接入本身在迁移前后也未变，只是旧 native 适配和较大的旧缓存曾经掩盖了它。当前修复把 TitleBar 放进 central grid，使布局本身完整表达约束，不依赖 QWindowKit 或旧的 `WM_GETMINMAXINFO` 副作用。
+
+该判断的证据边界：当前日志证明 QWindowKit 路径下 `MainWindow::minimumSize()`、`minimumSizeHint()` 与 `QWindow::minimumSize()` 一致，Windows 正确执行了 Qt 给出的值；没有 A/B 运行日志证明 QWindowKit 改变了 `QPushButton::sizeHint()` 的公式。因此知识库将本问题记录为“QWindowKit 迁移后暴露的布局合约回归”，而不是“QWindowKit 改变了 QWidget sizeHint”。
+
+2026-09-20 的 List Sweep 回归日志确认，在本次复现场景中 Windows 正确执行了 Qt 的最小尺寸，问题出在布局输入而非 native 链路。仍需在不同 DPI、OFDM 等布局较重的页面验证拖动边界，不能把一次验证泛化为所有环境均无问题。
+
+只有日志证实 native resize 没有遵守正确的 Qt 最小尺寸，才考虑聚焦的最小 track-size 适配器：读取实时 `minimumSize().expandedTo(minimumSizeHint())`，按当前 DPI 转换后只写 `ptMinTrackSize`。布局 hint 本身缺少约束时，应修布局而非加 native 拦截。不要恢复已由 QWindowKit 接管的 `WM_NCCALCSIZE`、`WM_NCHITTEST`、DWM、DPI、monitor 或 frame-refresh 代码，也不要重新写入 `ptMax*`。
+
+## 2026-09-20：首次显示 List Sweep 后标题栏被压缩
+
+两轮逐控件日志确认了两个独立层次：
+
+1. 隐藏 ListModePanel 的底部 `horizontalLayout` 保留 Windows 默认样式下的 `669x23` 汇总。首次显示前，各按钮实际上已经更新为 HarmonyOS Sans SC 18px / QSS 尺寸，但嵌套布局汇总仍旧；首次显示后该行重新计算为 `523x60`。表格 `61x99` 和参数按钮在切换前后没有变化。
+2. TitleBar 的 `minimumSizeHint()` 为 `820x50`，但旧接入方式 `layout()->setMenuBar(m_titleBar)` 不把其宽度纳入主窗约束。列表页旧缓存退场后，OFDM 的 `579` 与单列 dock 的 `125` 合为 `704`；主窗口 minimum/hint/QWindow minimum 一致为 `704`，因此 Windows 合法地把窗口缩到不足以容纳标题栏。
+
+按钮行宽度的实测分解：旧值 `7*75 + 76 + 40 + 28 = 669`；主题生效后的正确值 `82 + 97 + 6*46 + 40 + 28 = 523`。不能把过期的 `669` 固定下来作为产品下限，也不能把此次变化解释成 OFDM 约束丢失。
+
+Qt 5 的 [QLayout::totalMinimumSize()](https://codebrowser.dev/qt5/qtbase/src/widgets/kernel/qlayout.cpp.html#684) 对 menu-bar 槽位只累计高度。当前代码把完整 TitleBar 放入 central grid 的跨列首行，让普通布局自动汇总它的最小宽度；原 5px 间隔变为下一空行，CommonPanel/业务页/dock 整体下移行号，屏幕位置及总高度保持不变。截图通知备用定位直接从 TitleBar 映射坐标，不再依赖 menuWidget()。
+
+最小宽度由 **标题栏与所有业务页/侧栏共同约束**，不承诺只由 OFDM 决定。菜单内部仍使用 QMenuBar 的原有 overflow 行为；QWindowKit 的 title-bar/system-button/hit-test 注册不变。该布局修复已实施并静态检查，运行回归由用户完成，尚未宣称修复后实测通过。
 
 ## 与 minibar compact 的关系
 

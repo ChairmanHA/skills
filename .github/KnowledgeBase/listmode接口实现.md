@@ -395,14 +395,3 @@ List 命令使用 `registerCommand()`，不能使用当前会补 `[SENSe:]` 的 
 | 格式错误 | `#0`、坏长度字段、payload 非 8 倍数、NaN/Inf | 按 transport/parser 边界稳定拒绝，Draft 保持原值 |
 | 异步边界 | 快速发送三列、`APPLy`、随后修改 Draft | apply 使用提交时不可变快照，不依赖 sleep，不被后续 Draft 修改污染 |
 
-### 9. 首版范围
-
-首版必须同时具备：
-
-- CW 载波的 MScan 真实执行；
-- 第 4 节全部 R&S 命令头及查询接口；
-- `AUTO` 模式、三列数据、dwell、范围、触发映射、应用和运行状态的真实行为；
-- `INDex/RESet`、`STEP/INDex` 模式、`RMODe` 和文件容器命令的稳定兼容行为，其中 `STEP/INDex` 设置后 `LIST:MODE?` 返回实际生效值 `AUTO`；
-- 对不支持但合法的 R&S 命令不返回 `Undefined header`，也不写入错误队列。
-
-Playback/Streaming 可继续复用同一载波计划，但待 provider 选择成为服务级意图后再暴露，并且不承诺逐行切换波形。

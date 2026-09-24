@@ -100,12 +100,20 @@ instrument 模式通过 `TitleBar::setLogoVisible(false)` 隐藏 `iconLabel`。Q
 
 ### 3.1 标题栏本体的安装
 
-`MainWindow` 构造时创建 `TitleBar`，然后直接把它设为主窗口布局的 menu bar：
+`MainWindow` 构造时创建 `TitleBar`，把它放入 central grid 的跨列首行：
 
 - `m_titleBar = new TitleBar(this);`
-- `layout()->setMenuBar(m_titleBar);`
+- `centraLayout->addWidget(m_titleBar, 0, 0, 1, 2);`
 
-这说明当前自定义标题栏本身就是主窗口顶部框架的一部分，而不是普通内容区 widget。
+后接 5px 空行，CommonPanel/业务页位于第 2/3 行，右侧 modulation dock 跨第 2/3 行。标题栏保持顶部位置，但作为普通布局项参与主窗口最小宽度汇总，由 central widget 的 QObject 父子关系管理生命周期。QWindowKit 仍持有并使用同一个 TitleBar 的借用引用，拖动与系统按钮注册不变。
+
+2026-09-20 修复前使用 `layout()->setMenuBar(m_titleBar)`。Qt 的这个槽位只累计标题栏高度，不合并宽度，因此 List Sweep 隐藏布局的过期较大尺寸消失后，会允许窗口缩窄到标题栏最小宽度以下。修复没有固定窗口宽度，也没有更改菜单内部 overflow 策略。具体证据见 [Windows 主窗最小尺寸](mainwindow_frameless_minimum_size_contract.md)。
+
+### QWindowKit 迁移说明
+
+这次回归是在 QWindowKit 迁移后被观察到，但 QWindowKit 不负责 QWidget 布局的 `sizeHint()` 计算。迁移前后的扫描页和 `setMenuBar()` 接入没有变化；变化的是原 `MainWindowChromeWin::WM_GETMINMAXINFO` 适配被移除，窗口最小跟踪尺寸改由 Qt 默认链路提供。旧适配器会在 native resize 查询中主动激活 MainWindow/central layout，因而可能掩盖隐藏 ListModePanel 的延迟布局刷新。迁移后首次显示列表页时，Qt 正常激活隐藏布局并修正按钮行缓存，随后暴露标题栏宽度未纳入主窗口最小尺寸的问题。
+
+维护时应使用“迁移后暴露的布局合约回归”这一表述；除非有独立 A/B 证据，不要记录成“QWindowKit 改变了 `QWidget::minimumSizeHint()`”。修复应优先补全 QWidget 布局约束，不能恢复 SGStudio 对 QWindowKit 已接管的整套 native chrome 或把旧缓存尺寸固定下来。
 
 ### 3.2 菜单栏与输出模式按钮的装配
 
