@@ -83,7 +83,7 @@
 
 - 先生成 candidate tone lattice。
 - 普通模式下，删除满足 $|f_{baseband}| < \frac{NotchWidth}{2}$ 的候选 tone。
-- 当 `EvenCountCenterToneMask = true` 且 `Count` 为偶数时，FixedPlayback 设备 center 为 `logicalCenter + FreqSpacing / 2`，因此先换算
+- 当 `EvenCountCenterToneMask = true` 且 `Count` 为偶数时，FixedPlayback 和 Playback LScan 设备 center 为 `logicalCenter + FreqSpacing / 2`，因此先换算
 
 $$
 f_{logical} = f_{baseband} + \frac{FreqSpacing}{2}
@@ -145,7 +145,9 @@ $$
 
 generator profile 字段自身默认值仍是 `false`，但当前 HTRA `MultitoneModulation` 构造时会默认调用 `setEvenCountCenterToneMask(true)`。这个开关打开后，tone lattice 不再与 SMA / VSG60 的偶数 `Count` 行为一致。它应被理解为硬件问题收敛前的 generator 级临时 workaround，而不是新的对标语义。
 
-2026-06-29 补充：当前 FixedPlayback 路径还配套了一个同样临时的 RF center offset。HTRA Multitone provider 在 `EvenCountCenterToneMask = true` 且 `Count` 为偶数时，会在 `TxProviderExecutionContext` 中请求 `FreqSpacing / 2` 的 `fixedPlaybackCenterOffsetHz`；`TxPipelineRuntime::applyFixedPlayback()` 只在设备配置时把实际下发中心频率改成 `logicalCenter + FreqSpacing / 2`，并在 `deviceConfigurationDone` writeback 前恢复为 logical center，避免 UI / `CommonDeviceProfile` 持续漂移。该 offset 只用于 FixedPlayback，不用于 SweepPlayback。
+2026-09-30 更新：FixedPlayback 和 Playback LScan 配套一个临时 RF center offset。HTRA Multitone provider 在 `EvenCountCenterToneMask = true` 且 `Count` 为偶数时，会在 `TxProviderExecutionContext` 中请求 `FreqSpacing / 2` 的 `fixedPlaybackCenterOffsetHz`；补偿规则只归属 Multitone，其他 provider 默认值为零。`TxPipelineExecutor::applyFixedPlayback()` 在设备配置时把实际下发中心频率改成 `logicalCenter + FreqSpacing / 2`，并在 `deviceConfigurationDone` writeback 前恢复 logical center。
+
+`TxPipelineExecutor::applySweepPlayback()` 仅在 `CarrierPlanKind::LScan` 下复用该偏移：基础 FFM 配置和 `startPlaybackLevelSweep()` / `tx_config_lscan()` 使用同一个补偿后 center。基础配置回写、无波形等待路径，以及扫描查询成功/失败的最终回写都保持逻辑 center，避免 UI / `CommonDeviceProfile` 漂移或重复加偏移。FScan、MScan、CW 和 Streaming 不消费该偏移；不修改用户配置或全局中心频率。
 
 2026-06-30 revision: FixedPlayback still restores `writeback.center` to `logicalCenter` before publishing `deviceConfigurationDone`, so the temporary device offset does not accumulate through `CommonDeviceProfile`. The ready-payload success path now emits only one final `deviceConfigurationDone`; the Phase 1 writeback is kept only for the no-payload early-return path.
 

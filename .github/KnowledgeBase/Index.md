@@ -10,7 +10,7 @@
 | TX、RF/MOD、runtime、provider、插件加载、退出死锁 | [A-runtime](#a-runtime) |
 | 设备发现、切换、USB/ETH、UID、多实例、时钟、Trigger、许可证 | [B-device](#b-device) |
 | Playback、ARB、WAV/IQS、采样率、带宽、容量、大波形 | [C-playback](#c-playback) |
-| AM/FM/Ramp、Multitone、RMS、Digital/16QAM、频谱仪验证 | [D-waveform](#d-waveform) |
+| LF AWG/TrueArb、Arb 波形编辑、EasyWave、AM/FM/Ramp、Multitone、RMS、Digital/16QAM、频谱仪验证 | [D-waveform](#d-waveform) |
 | SCPI、程序级远程控制、命令接入、ListMode 命令兼容 | [E-scpi](#e-scpi) |
 | Sweep/FScan、扫描业务、CW 模式切换、预校验 | [F-sweep](#f-sweep) |
 | Minibar、helper、typed IPC、LayerShellQt、浮窗 | [G-minibar](#g-minibar) |
@@ -56,22 +56,22 @@ Get-Content -Encoding UTF8 -LiteralPath "$kb\listmode_scpi调试指南.md" | Sel
 - [USB / ETH 断联恢复分析](eth设备和usb设备断联恢复的异同点分析.md)：失联判定、注销、coordinator 差异。
 - [H2 API v2.0 参考](htra_h2_api_v2_0_usage.md)：设备能力与 API 调用顺序。
 - [设备设置与 Trigger 拆分](device_settings_panel_and_trigger_split_design.md)：Reference Clock / Trigger In-Out / RF Hardware。
-- [参考时钟接入](htra_reference_clock_integration.md)：Profile / FeatureSpec 与前端联动。
+- [参考时钟接入](htra_reference_clock_integration.md)：Profile / FeatureSpec、External 失锁切回 Internal 与实际状态回写。
 - [Capability ID 分档方案](common_capability_id_and_hw_version_strategy.md)：model / hardware_version / 公共语义 ID。
 - [RF Port 能力与绑定](rfport_open_query_and_ui_binding.md)：open 查询、EnumTextButton / property。
 - [型号显示名](device_model_display_name_rules.md)：device_info.xml 条件别名。
-- [Analog 许可证](analog_device_license_gating.md)：FixedLic、USB/ETH 时序与 UI 门控。
+- [Analog 许可证](analog_device_license_gating.md)：FixedLic、USB/ETH 时序、UI 门控与隐藏页面启动恢复。
 - [PGA 平台状态](pga_runtime_realtime_status_chain.md)：CPU 温度、电池、状态栏链路。
 - [GPIO 位掩码分析](GPIO_interface.md)：setbits / resetbits 语义推断，需核实 API 契约。
 
 ## C-playback
-
+- [信号损伤 P0 算法接入与交互](signal_impairments_p0_interaction_design.md)：五项 P0 算法与难度、离线 Baseband 开放依据、可写 IQ 到不可变 payload 的接入、SNR/功率与 Apply；[原始需求](信号损伤功能需求文档.md)，尚未实施。
+- [Center/Level 配置链路重构设计](CenterLevel配置链路重构设计.md)：固定 Playback 的 FFM-only 当前实现；CW、Mute 与 LScan/FScan 的后续优化方向。
 - [入口：波形参数约束](Waveform_Parameters_Constraints.md)：默认值、采样率、IQ 带宽、UI 联动；含 AWGN 单遍/分块 FIR 优化、实测耗时及频谱/RMS验收。
 - [多型号 Playback 能力迁移](htra_multi_model_playback_capability_refactor.md)：能力域、revision、immutable payload、分阶段进度。
 - [设备能力参数策略](playback_waveform_parameter_capability_policy.md)：OPTION_BW_320M_TX、400 MSPS 与参数决策目标。
 - [产品参数决策矩阵](playback_parameter_product_decision_matrix.md)：无/有选件对比、待实现与待确认项。
 - [ARB 模式入口](arb_mode_summary.md)：Ordinary / IQS / ProgrammedArb 解析与 runtime 边界。
-- [AWG、LF 链路与模型 B0](awg_model_b0_lf_chain_and_waveform_processing.md)：AWG 本质、RF/LF 边界、固定采样缓冲契约、全波形处理及 B0 参数界面归属。
 - [OrdinaryWav 截取与周期](arb_ordinary_wav_slice_period_semantics.md)：sampleOffset / samplesToUse / period。
 - [大波形内存与下载](large_waveform_streaming_plan.md)：payload 驻留、125/1000 MiB、租约与下载后释放。
 - [Digital 大波形汇报](digital_large_waveform_status_summary.md)：截断播放与完整保存的阶段总结。
@@ -79,8 +79,12 @@ Get-Content -Encoding UTF8 -LiteralPath "$kb\listmode_scpi调试指南.md" | Sel
 - [IQS-WAV 格式参考](IQS-WAV文件格式说明.md)：录制文件、trig / prof MsgPack，区别于 Save IQ。
 
 ## D-waveform
+- [Arb 最小编辑模型与用户交互](arb_editor_minimum_model_and_user_interaction.md)：产品交互方案；竞品分层、A/B/D/E/F 场景；三类片段、图表联动、选区替换与五类操作流程，不展开实现细节。
+- [Arb 编辑需求与最小分段表设计](arb_editor_requirements_and_segment_table_design.md)：竞品手册分层；A/B/C/D/E 单通道编辑场景；Hold/Ramp/Data 最小模型、覆盖原理与五类案例、拆分与等时长替换；选区、替换、插入与幅值调整的即时反馈 UI 配图；与固定点数点表方案的区别，尚未实施。
+- [入口：TrueArb 独立波形编辑器设计](awg_truearb_arb_editor_design.md)：SGStudio 启动与文件交接；固定点数、Sine/Square 模板；双游标、表格连续行选择或起止索引确定填充范围，电压点表同步及撤销；附 EasyWave 研究与 C0 边界。
+- [TrueArb 硬件契约与七类波形算法](awg_truearb_waveform_algorithms_and_arb_editing.md)：C0 逐点播放所需设备能力、相对 B0 的软件交付变化、文件导入语义与厂商调研。
 - [Digital 交互入口](digital_modulation_user_interaction_flow.md)：SPS、异步生成、截断、reset、保存。
-- [Multitone 算法入口](htra_multitone_current_algorithm_and_vsg60_boundaries.md)：tone / notch / phase / AutoScale / preview。
+- [Multitone 算法入口](htra_multitone_current_algorithm_and_vsg60_boundaries.md)：tone / notch / phase / AutoScale / preview；Fixed 与 LScan 的偶数音 center 补偿。
 - [Multitone 与 VSG60 对比](multitone_vsg60_three_case_comparison_and_playback_consistency.md)：三组样本与 Playback 一致性。
 - [iqtone.m 借鉴候选](htra_multitone_iqtone_reuse_candidates.md)：历史参考、后续优化建议。
 - [Multitone / Pulse RMS 原理](htra_rms_power_multitone_pulse_principle.md)：PEP、占空比与满幅参考。
@@ -97,7 +101,7 @@ Get-Content -Encoding UTF8 -LiteralPath "$kb\listmode_scpi调试指南.md" | Sel
 ## E-scpi
 
 - [入口：SCPI 接入审阅与方案](scpi_review_and_integration_plan.md)：TX/UI 回写、错误语义、ScpiIntentService 迁移。
-- [ListMode 命令调试入口](listmode_scpi调试指南.md)：TCP 5025、命令表、查询响应、R&S 兼容实测流程。
+- [ListMode 命令调试入口](listmode_scpi调试指南.md)：TCP 5025、命令表、查询响应、SCPI 临时 MScan 限制与历史 R&S 实测流程。
 - [ListMode 接口设计](listmode接口实现.md)：MScan、真实执行与兼容映射边界。
 - [R&S List Mode 参考](rs_list_mode_scpi_reference.md)：R&S 的 listmode scpi命令、触发、索引、学习与文件容器。
 
@@ -123,13 +127,14 @@ Get-Content -Encoding UTF8 -LiteralPath "$kb\listmode_scpi调试指南.md" | Sel
 - [Auto Mod 用户意图](auto_mod_user_intent_boundary.md)：FancyTabWidget 信号与 MOD availability。
 - [调制列表响应式布局](fancytabwidget_modulation_list_responsive_layout.md)：单/双列、宽度与滚动条。
 - [TitleBar 菜单与溢出](titlebar_menubar_outputmode_and_overflow_behavior.md)：central grid 接入、输出模式、工具组、重复触摸。
-- [Instrument 窗口平台行为](instrument_ui_mode_platform_window_behavior.md)：QWindowKit 归属、Linux x86_64 非目标范围与 aarch64 Wayland 1024×600 非全屏合同。
+- [Instrument 窗口平台行为](instrument_ui_mode_platform_window_behavior.md)：树莓派主屏 1024×600 自动启动、显式 ui-mode 优先、QWindowKit 归属与全屏合同；[SMA100B 风格 Home / 配置导航](instrument_home_sma100b_layout_and_navigation.md)：Home 状态摘要四行两列、Sweep 卡片内方形绿色开关及右侧 Back，System 配置使用分类页面；仅静态核对，未真机验收；[旧 Home / Main 历史](<5寸屏幕的Home Main 交互设计.md>)：设置 Home、全宽 Main、悬浮导航与类型弹窗。
+- [Instrument System 分类页面 / Tab](instrument_system_category_dialog_design.md)：六类入口、当前值摘要、配置单页、主题蓝色 Tab 和逐层 Back；Excel 翻译暂缓。[Stacked 切页动态 Popup 禁绘陷阱](qt_stacked_layout_dynamic_popup_updates_disabled.md)：Win32 / Wayland 共同根因、visible/exposed 但无 Paint 的判据、创建时机与修复边界。
 - [Windows 主窗最小尺寸](mainwindow_frameless_minimum_size_contract.md)：QWindowKit 迁移后暴露的 List Sweep 隐藏布局缓存、标题栏宽度汇总与 native resize 合约。
 - [Wayland Panel 高度与启动时序坑](mainwindow_panel_minimum_height_wayland_contract.md)：延迟 show、隐藏窗口临时几何、发行版 Qt 与自带标准 Qt 的补丁差异、Wayland 全屏状态栏裁切。
 - [High DPI 入口](high_dpi_development_practices.md)：Qt5 缩放、资源倍率、多屏拖动。
 - [多屏 popup 几何](multiscreen_popup_geometry_and_screen_topology.md)：屏幕断开、DPI、EnumTextButton / ComboBox / QMenu。
 - [Frameless 白边排障](frameless_multimon_dpi_white_border_issue.md)：多屏与高 DPI。
-- [设备状态 UI 反馈](device_status_ui_feedback.md)：error / warning 去重与 Minibar 例外。
+- [设备状态 UI 反馈](device_status_ui_feedback.md)：error / warning 去重、RLO15 短暂报警与 Minibar 例外。
 - [MessageDialog](messagedialog_design.md)：交互、hosted 层级与提示边界。
 - [NotificationPopup](controls_notification_popup.md)：非模态通知、动画、定位与自动关闭。
 - [Wayland 无边框弹窗](WAYLAND_FRAMELESS_OVERLAY_PATTERN.md)：overlay 与遮罩模式、List Mode 数字键盘与全局外部点击边界。
@@ -137,7 +142,7 @@ Get-Content -Encoding UTF8 -LiteralPath "$kb\listmode_scpi调试指南.md" | Sel
 
 ## I-input-pitfalls
 
-- [入口：软键盘体系](soft_keyboard_architecture.md)：TouchNumKeyboard / BaseUnitAdapter / 单位同步 / helper-local / instrument 键盘与 Panel QSS 边界。
+- [入口：软键盘体系](soft_keyboard_architecture.md)：数值键盘与单位同步、helper-local、Instrument 数字键盘固定右侧及 5 寸文本键盘回显焦点与主题边界。
 - [数值步长策略](numeric_step_strategy_guidelines.md)：可编辑 / 125 / 固定步长选择。
 - [树莓派系统键盘](wayland_raspberry_pi_system_keyboard_integration.md)：QLineEdit / QInputMethod / OSK0 / DBus。
 - [重复软键盘](Pitfalls/Property_Binding_Duplicate_SoftKeyboard.md)：隐藏 panel、多控件绑定、beginEditing 来源。
@@ -169,7 +174,7 @@ Get-Content -Encoding UTF8 -LiteralPath "$kb\listmode_scpi调试指南.md" | Sel
 
 ## L-updater
 
-- [入口：Updater 当前实现](updater_firmware_update_mechanism.md)：下载、version.json、固件 Profile、H2 命名空间过渡、maintenance。
+- [入口：Updater 当前实现](updater_firmware_update_mechanism.md)：下载、version.json、型号默认/选件特殊版本、Schema 1/2 与旧读取器兼容、H2 命名空间过渡、maintenance。
 - [Updater 整改重点](updater_mechanism_gap_and_remediation.md)：已收敛行为、剩余问题与验收。
 - [Standard CN 远程更新联测](standard_cn_remote_manual_update_test_guide.md)：发布 URL、包结构、手工下载与回滚。
 - [A/B 顺序固件更新分析](shared_chassis_ab_sequential_updater_analysis.md)：共享 IP 概率失败、待取证假设。

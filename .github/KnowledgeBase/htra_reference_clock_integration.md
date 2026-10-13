@@ -7,23 +7,23 @@
 ## 1. 目标与边界
 
 - 目标：让真正影响波形配置的参考时钟参数进入当前 `Property -> CommonDeviceProfile -> IBusiness -> Core::IDevice::Profile -> FancyDevice::configuration()` 配置链路，同时把仅影响时钟输出开关的 `SystemClockOut` 单独下沉为设备快捷控制。
-- 当前范围：`RefClockSource / RefClockFrequency` 已完成设备层、Profile 层、Property 层和前端联动；`SystemClockOut` 已改为设备直配；普通配置成功后会通过 `device_query_clock()` 二次查询并以设备真实状态回写。尚未完成失败即中止。
+- 当前范围：`RefClockSource / RefClockFrequency` 已完成设备层、Profile 层、Property 层和前端联动；`SystemClockOut` 已改为设备直配。普通配置在时钟配置后、载频与输出配置前查询真实状态；External 查询返回失锁 warning 15 时单次切回 Internal，再确认并回写。时钟查询或恢复失败会中止本次配置。
 - 当前设备：HTRA 插件 `FancyDevice`。
 
 ## 2. 当前接口模型
 
 ### 2.1 底层 H2 API
 
-第三方 API 定义在 `3rdParty/htra/h2_api.h`：
+第三方 API 定义在 `3rdParty/h2_api/include/h2_api.h`：
 
-- `device_config_clock(void** device, referenceclock_source source, double fref, state out)`
-- `device_query_clock(void** device, referenceclock_source* source_o, double* fref_o, state* out_o, state* locked_o)`
+- `device_config_clock(void** device, uint8_t state_ext_ref, double fref, uint8_t state_ref_out)`
+- `device_query_clock(void** device, uint8_t* state_ext_ref_o, double* fref_o, uint8_t* state_ref_out_o, uint8_t* is_locked_o)`
 
 其中：
 
-- `source`：参考时钟源，当前为 `REFCLKSOURCE_INTERNAL` / `REFCLKSOURCE_EXTERNAL`
+- `source`：参考时钟源，当前为 `REF_INT` / `REF_EXT`
 - `fref`：参考时钟频率
-- `out`：参考时钟输出开关，底层为 `STATE_OFF` / `STATE_ON`
+- `out`：参考时钟输出开关，底层为 `REF_OUT_OFF` / `REF_OUT_ON`（0 / 1）
 - `locked`：参考时钟监控锁定状态，当前作为查询态保留，暂未进入 UI 展示
 
 ### 2.2 Core 抽象层
@@ -84,7 +84,7 @@
 - 参考时钟源：Internal / External
 - 系统时钟输出：Disable / Enable
 
-并通过 `RefClockSourceMapping` 将 `Utils::Id` 映射到底层 `referenceclock_source`。
+并通过 `RefClockSourceMapping` 将 `Utils::Id` 映射到底层 `uint8_t` 参考源值。
 
 ### 4.2 查询缓存
 
@@ -96,7 +96,7 @@
 
 当前默认值为：
 
-- `source_query = REFCLKSOURCE_INTERNAL`
+- `source_query = REF_INT`
 - `refFreq_query = 100E6`
 - `clockOut_query = STATE_OFF`
 
@@ -116,7 +116,7 @@
 3. `CommonDeviceProfile` 只将 `RefClockSource / RefClockFrequency` 纳入 `CommonProfileGroup`；`SystemClockOut` 只保留为运行时镜像值
 4. `IBusiness::getCurrentProfile()` / `TxPipelineRuntime::fillDeviceProfile()` 仍会读取当前镜像值，保证其它公共参数重下发时不会顺手把 RefOut 冲掉
 5. `FancyDevice::configuration()` 在普通 apply 里仍会把 `Profile.systemClockOut` 透传给 `device_config_clock()`
-6. 普通配置成功后，`FancyDevice::fillWritebackProfileLocked()` 会再次 `device_query_clock()`，再通过 `deviceConfigurationEnd` 把参考时钟字段回写到 `CommonDeviceProfile`
+6. `FancyDevice::fillWritebackProfileLocked()` 在完整 common/mode 配置和其他参数回读之后调用 `queryReferenceClockLocked()` 查询/恢复，使用返回的实际时钟填充 writeback，完成信号再同步到 `CommonDeviceProfile`。`TxPipelineExecutor` 同时把实际参考源、频率与 RefOut 同步到 effective request
 7. Device Settings 页面在设备切换、open 状态变化、用户点击后，会主动 query 完整 `ReferenceClockState` 并刷新 `RefClockSource / RefClockFrequency / SystemClockOut`
 
 补充边界：
@@ -132,13 +132,17 @@
 3. 根据 `input.systemClockOut` 计算 `targetClockOut`
 4. 调用 `device_config_clock()`
 5. 若成功或 warning，则更新 `source_query/refFreq_query/clockOut_query`
-6. 之后再调用 `tx_config_ffm()`
-7. 普通配置成功后再次调用 `device_query_clock()`，并用设备真实状态填充 writeback
+6. 完成 common 和模式/输出配置，再执行 writeback 中既有的载波、端口、LO 等回读
+7. 在原有时钟回读位置调用 `queryReferenceClockLocked()`：查询 External 返回 `H2_WARNING_SYSCLK_UNLOCKED (15)` 时，直接配置 `REF_INT / 100 MHz`，保留此次查询得到的 RefOut，再查询一次确认实际参考源为 Internal；不添加等待或循环重试
+8. 使用查询/恢复返回的实际时钟填充 writeback；时钟查询/恢复失败向 configuration 返回 false，不发布成功回写。没有 writeback 的配置仍在 common/mode 配置结束后查询
 
-这个顺序符合射频行业常规：
+设置页的 `queryReferenceClock()` 复用同一设备层规则，成功返回的是恢复后的实际时钟；该查询可能配置硬件，调用方通过 `setReferenceClock()` 同步结果。时钟切换会使设备的 Playback apply snapshot 失效。
 
-- 先确定参考时钟环境
-- 再配置载频与幅度
+原始失锁 warning 15 保留到下一次实时状态发布，不会被恢复查询或其他普通正数 warning 覆盖；`getRealTimeStatus()` 消费后仍清零。状态栏沿用原始失锁报警与 RLO15，在下一次无 warning 的约 1 秒刷新中清除，不添加“已切回内部”的提示，也不新增周期时钟轮询。
+
+2026-10-08 现场回归：将时钟查询提前至 `device_config_clock()` 紧后，导致用户反复切换时通常没有告警/恢复；恢复原 writeback 查询位置并加入诊断日志后，17:20:11–17:20:35 的 8 次 External 请求均返回 `status=15/source=1/locked=0`，恢复确认均为 `status=0/source=0/locked=1`，原 warning 15 保留到回写。配置返回日志到查询前日志间隔 0–7 ms，查询前/返回日志间隔 295–302 ms。日志同步加锁写文件，因此这些时间不是纯 API 耗时；本轮同时调整查询位置和日志，尚不能完全排除日志的时序影响，也不能据此宣称固件存在固定等待要求。后续如需区分，应保持 SDK 顺序，只移除查询前诊断输出做对照。详见 [查询顺序回归修正 TaskLog](../TaskLog/2026-10-08_reference-clock-query-timing-regression.md)。
+
+随后已按用户要求删除全部新增 `[RefClock]` 诊断输出，保持 SDK 调用顺序与恢复规则，供用户进行无额外日志的对照测试；该轮结果待反馈。
 
 而当前 `RefOut` 按钮自身的点击路径不再经过这条顺序；它只复用设备当前缓存的 `source / fref` 切换输出开关。
 
@@ -255,22 +259,11 @@
 
 当前 `device_config_clock()` 执行后：
 
-- 只有在返回 `>= STATUS_NOERROR` 时才更新本地缓存
-- 普通配置 writeback 会优先使用随后 `device_query_clock()` 得到的设备真实状态
-- 若查询失败，writeback 保持使用缓存值作为窄 fallback
+- 配置返回 `>= H2_NOERROR` 时更新接受的配置缓存
+- 在载频/输出配置前查询实际状态，必要时单次恢复 Internal 并确认；最终回写使用实际时钟缓存
+- 查询、恢复配置或恢复确认失败时返回 false；不使用缓存伪造一次成功回写
 
-因此如果切换到外参考失败：
-
-- 缓存仍可能保留原来的内参考状态
-- 后续 writeback 也会回显原来的内参考状态
-
-这在“设备实际没有成功切到外参考”的前提下是合理的，但当前实现仍有一个工程问题：
-
-- 参考时钟配置失败后，流程仍继续执行后续 `tx_config_ffm()` / trigger / mode 配置
-
-更稳妥的后续改进建议：
-
-1. `device_config_clock()` 失败时立即中止整个配置流程
+因此 External 查询返回正数 15 是有明确恢复策略的 warning：单次切回 Internal，确认成功后继续本次配置。其他正数 warning 不触发切源；负数 API 错误及恢复确认未切为 Internal 都使本次配置失败。
 
 ## 10. 当前前端行为约束
 
@@ -304,7 +297,8 @@
 - `deviceConfigurationEnd` 已把 writeback 回刷到 `CommonDeviceProfile`
 - Device Settings 页面中的 RefOut 已切换为直配按钮
 - `IDevice::queryReferenceClock()` 暴露完整参考时钟查询结果，Device Settings 页面 query 后同步 `RefClockSource / RefClockFrequency / SystemClockOut`
-- `FancyDevice::configuration()` 成功后的 writeback 会重新 `device_query_clock()`，优先回写设备真实参考时钟状态
+- `FancyDevice::configuration()` 在输出配置前查询/恢复参考时钟，writeback 与 runtime effective request 都同步设备实际状态
+- External 查询 warning 15 的单次 Internal 恢复及参考时钟失败即中止已完成（2026-10-08，静态检查；硬件行为待实测）
 - Internal `100 MHz` 有效值策略已实现，且不再写入外参考频率控件
 - External 默认 `10 MHz` 策略已实现
 - 保存/恢复配置链路已覆盖 `RefClockSource / RefClockFrequency`，但不再覆盖 `SystemClockOut`
@@ -315,7 +309,6 @@
 尚未完成：
 
 - 外参考频率候选值约束
-- 参考时钟失败即中止
 
 ## 12. CommonDeviceProfile 频率状态约束
 
@@ -342,4 +335,3 @@ Internal 的 `100 MHz` 不再作为控件值缓存，也不再通过 `RefClockFr
 当前剩余工作主要集中在“更严格的工程正确性”而非“基础链路是否存在”，即：
 
 - 外参考频率候选值限制
-- 失败即中止后续配置

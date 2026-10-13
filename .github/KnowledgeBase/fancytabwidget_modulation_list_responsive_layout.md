@@ -1,6 +1,8 @@
 # FancyTabWidget 调制列表响应式布局设计
 
-本文记录 `FancyTabWidget` 右侧 modulation list 当前的响应式布局设计，重点说明：
+> 2026-10-12 更新：第 1–13 节的响应式宽度决策仍适用于桌面 main；第 14 节的 Instrument 类型弹窗为历史版本。最新 Instrument 使用右侧固定单列、Back 和上下箭头，见第 15 节。
+
+本文记录桌面 `--ui-mode=main` 的 `FancyTabWidget` 右侧 modulation list 响应式布局设计，重点说明：
 
 - 为什么它不能只靠一个 `if (width < X)` 的阈值切换；
 - 为什么 `MainWindow` 的布局结构会直接影响切换判定；
@@ -12,7 +14,7 @@
 
 这块响应式逻辑之所以容易改错，根本原因不是 `QListWidget` 难用，而是**右侧 modulation dock 不在 `FancyTabWidget` 内部布局里**。
 
-当前主窗口中心区在 `MainWindow` 中是两列布局：
+桌面 main 的主窗口中心区在 `MainWindow` 中是两列布局：
 
 ```text
 左列: CommonPanel + FancyTabWidget
@@ -31,13 +33,14 @@
 
 ## 2. 当前目标
 
-右侧 modulation list 当前需要同时满足五个目标：
+桌面右侧 modulation list 当前需要同时满足四个目标：
 
 1. 主窗足够宽时，使用双列列表，减少纵向长度。
 2. 主窗缩窄后，稳定切到单列，不在临界区来回抖动。
 3. 单列模式下，当内容很多时允许纵向滚动条出现。
 4. 单列模式下，当内容很少根本不需要滚动条时，不要保留多余右侧空带。
-5. instrument 强制单列模式隐藏原生滚动条，用顶部/底部浮动按钮和触摸滚动访问内容，把 dock 固定收缩到 `100px`。
+
+Instrument 现使用左侧固定单列，复用同一业务列表；不使用桌面右侧 dock 的宽度判定。详见第 15 节；第 14 节保留此前类型弹窗的历史。
 
 一句话概括：
 
@@ -67,7 +70,7 @@
 - `205` 表示双列 dock 的目标宽度；
 - `125` 表示“普通响应式单列且需要原生滚动条”时的目标宽度；
 - 单列无滚动条时，允许进一步收缩到 `100`，与 item 宽度对齐。
-- instrument 强制单列始终为 `100`，滚动能力不再通过增加 dock 宽度获得。
+- Instrument 右侧列表不使用此 dock 宽度决策，dock/list 固定 132 px，条目 130×100 px、固定单列，使用上下箭头和触摸滚动。
 
 ### 3.3 主窗舒适阈值
 
@@ -220,7 +223,7 @@ effectiveContentWidth = FancyTabWidget::width()
 
 这样单列宽度就能和 item 宽度完全对齐。
 
-instrument 强制单列是明确的例外：无论是否需要滚动都保持 `100px`，原生滚动条为 `AlwaysOff`，滚动范围由两个 `100px` 宽的半透明浮动按钮和 viewport 上的触摸手势访问。按钮固定覆盖在列表顶部/底部，每次移动一个 `100px` item；顶部隐藏上按钮，底部隐藏下按钮，没有滚动范围时全部隐藏。
+Instrument 当前恢复为 132 px 固定单列，双向滚动条均为 AlwaysOff，使用固定上下箭头和触摸滚动；此前 4×4 类型弹窗的尺寸问题保留在第 14 节，不影响桌面 dock 的宽度策略。
 
 ## 9. 如何判断单列是否真的需要滚动条
 
@@ -246,13 +249,13 @@ else:
 
 - 它只决定**普通响应式单列时该用 `100` 还是 `125`**；
 - 它**不参与**一列/两列模式切换的主阈值判定。
-- 它不参与 instrument 强制单列；该模式固定为 `100px`。
+- 它不参与 Instrument 类型选择弹窗的尺寸计算。
 
 这点必须严格保持，否则很容易重新引入新的反馈回路。
 
 ## 10. 当前刷新顺序
 
-`updateModulationListLayout()` 当前应保持下面这个顺序：
+`updateModulationListLayout()` 的桌面分支保持下面这个顺序：
 
 1. 计算目标 dock 宽度。
 2. 如果宽度变化，更新 dock/list 的 fixed width。
@@ -261,9 +264,9 @@ else:
 5. 应用纵向滚动条策略：
    - 双列：AlwaysOff
    - 普通响应式单列：AsNeeded
-   - instrument 强制单列：AlwaysOff
 6. 刷新 item 布局与 viewport 几何。
-7. 按 instrument 强制单列状态启用或关闭浮动导航和触摸滚动手势。
+
+Instrument 分支单独应用 Fixed / TopToBottom / no wrapping、130×100 px 条目与 AlwaysOff 滚动条后返回，不执行 dock 宽度判定。两种模式的条目几何更新均屏蔽 itemChanged，避免尺寸更新被旧 check-state 槽误当作业务选择变化。
 
 这里的要点是：
 
@@ -306,7 +309,7 @@ else:
 4. item 的 `gridSize` / `sizeHint` 是否仍然在每次 rebuild 后被重新应用。
 5. 单列无滚动条时是否确实能收缩到 `100px`，而不是白白保留 `125px` 空带。
 6. 普通响应式单列有滚动条时是否仍然保留 `125px`，避免 item 与滚动条互相挤压。
-7. instrument 强制单列是否固定为 `100px`，原生滚动条是否隐藏，浮动按钮是否按滚动位置正确显隐。
+7. Instrument 右侧是否只使用同一业务列表，单列/上下箭头是否稳定，页面切换是否保持原业务使能语义。
 8. hover、主题切换、列表 rebuild 后是否仍然不会触发列数闪烁。
 
 ## 13. 结论
@@ -316,6 +319,15 @@ else:
 1. **一列/两列切换由主窗宽度阈值决定，但判定必须使用不会被 dock 自己反向污染的稳定量。**
 2. **单列/双列必须是显式布局模式，不能只靠缩放 dock 宽度去暗示 Qt。**
 3. **普通响应式单列再按是否真的需要纵向滚动条，在 `100` 和 `125` 之间细分宽度。**
-4. **instrument 强制单列固定为 `100px`，用不占布局空间的浮动按钮和触摸手势替代原生滚动条。**
+4. **Instrument 使用同一业务列表的右侧固定单列；不将此固定宽度引入桌面 dock 的响应式判定。**
 
 后续只要保持这三条边界，修改视觉参数时就不容易再次掉回“能切但会抖”“能收但收不进去”“宽度对了但列数不对”的旧坑里。
+
+## 14. SMA 风格 Instrument 右侧单列（2026-10-12）
+
+- enableInstrumentModulationList() 在 Instrument 初始化分支调用；同一个 CustomListWidget 从 dock 内容区移入带上下按钮的 QWidget，随后该容器由原 dock 承载。MainWindow 把 dock 放到最右侧固定 Back 按钮下方，左侧仍是原 FancyTabWidget 与参数滚动区。
+- dock/list 固定宽 132 px，条目 130×100 px；Fixed + TopToBottom + no wrapping，滚动条隐藏，上下各 40 px 的按钮按 100 px 推动原垂直滚动值，并根据范围禁用到边界的箭头。列表保留触摸滚动。
+- 注册顺序、业务映射、当前页面、业务使能 delegate 与可用性仍走原实现；没有第二份业务列表或 Panel。旧类型选择弹窗及其浏览/提交路径已删除，列表选择直接走原 onCurrentItemChanged() 的页面导航，不触发业务使能。
+- updateModulationListLayout() 的 Instrument 分支在桌面宽度判定前返回；桌面 main 的 100 px 条目、100/125/205 px dock 和滞回规则保持不变。
+- Sweep 在 Instrument 独立配置页中使用唯一 StepSweepPanel，不再注册为 FancyTabWidget 的 standalone 页；桌面 main 的 standalone 页面保持原注册方式。
+- 已接入，仅静态检查；详见 [SMA 风格 Home 与配置导航](instrument_home_sma100b_layout_and_navigation.md) 与 [实施 TaskLog](../TaskLog/2026-10-12_implement-sma-instrument-home.md)。

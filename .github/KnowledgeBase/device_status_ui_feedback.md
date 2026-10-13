@@ -31,7 +31,7 @@
    - 入口同样是 `deviceRealTimeStatusUpdated(status)`。
    - `DeviceInfoWidget::updateDeviceRealTimeStatus()` 直接读取原始 `warnningCode`。
    - 若 warning code 是 `15/16/17/18`，则在状态栏右侧显示很小的 `RLOxx` 指示。
-   - 其中 RLO15 在当前参考源为 External 时还会进入“状态型滚动 warning”链路。
+   - RLO15 同时触发短暂的失锁滚动报警，不依赖恢复后的当前参考源属性。
 
 4. **配置结果型局部状态链路（Level UnLevel）**
    - 入口不是实时轮询，而是 `tx_config_ffm()` 的局部返回结果。
@@ -234,7 +234,7 @@ warning 不走 `MessageDialog`，而是进入状态栏控件 `DeviceInfoWidget` 
 
 `MainWindowDeviceController::onDeviceRealTimeStatusUpdated()` 对 warning 的处理规则是：
 
-1. 先处理带生命周期的状态型 warning，例如 External 参考源下的 RLO15。
+1. 先处理随状态快照出现/消失的 warning，例如参考时钟 RLO15。
 2. 普通 warning 仅在 `status.warnningCode != 0` 时处理。
 3. 若 `m_lastWarningCode == status.warnningCode`，则忽略，避免重复入队。
 4. 调用 `device->warningCategory(status.warnningCode)` 做分类。
@@ -253,16 +253,17 @@ warning 不走 `MessageDialog`，而是进入状态栏控件 `DeviceInfoWidget` 
 
 更完整的 preview 边界见 [sweep_preview_validation_boundary.md](sweep_preview_validation_boundary.md)。
 
-### 5.1.1 External RefClock Unlock 状态型 warning
+### 5.1.1 参考时钟失锁短暂 warning
 
-External 参考源下的 RLO15 使用状态型 warning，而不是普通一次性 warning：
+External 设置查询返回失锁 warning 15 时，设备层恢复 Internal，UI 保留原始失锁报警一份状态快照的时间：
 
-1. HTRA 设备层仍复用 `device_query_state()` 的实时轮询结果，不额外把 `device_query_clock()` 接入高频状态轮询。
-2. 当 `status.warnningCode == STATUS_WARNING_SYSCLK_UNLOCKED (15)` 且当前 `RefClockSource == External` 时，`MainWindowDeviceController` 向 `DeviceInfoWidget` 增加滚动文案：`External reference clock not locked.`
-3. 当 RLO15 消失、切回 Internal、断开设备或切换设备时，controller 调用 `removeWarnningMessage()` 移除该文案。
-4. 该机制使用独立布尔状态去重，不依赖 `m_lastWarningCode`，因此可以表达“出现时持续滚动，消失时立即消失”的状态语义。
+1. 当前 H2 API 已无旧 `device_query_state()`。`device_query_clock()` 用于完整配置后的 writeback 查询和设置页显式查询，不接入高频状态轮询；普通配置沿用原先其他参数回读之后的查询位置。
+2. External 查询返回 `H2_WARNING_SYSCLK_UNLOCKED (15)` 时，`FancyDevice` 单次配置回 Internal 并确认，把原始 15 保留到一次实时状态发布；后续普通正数 warning 不覆盖待发布的 15。
+3. 当 `status.warnningCode == 15` 时，controller 增加已有文案 `External reference clock not locked.`。不再要求当前 Profile 为 External，因为硬件和 Profile 此时可能已回到 Internal。
+4. `getRealTimeStatus()` 发布后清零；下一次约 1 秒刷新未收到 15 时，controller 调用 `removeWarnningMessage()` 移除文案，`DeviceInfoWidget` 同时隐藏 RLO15。断开/切换设备也会清除。
+5. 沿用独立布尔状态去重与既有队列，不添加恢复成功文案、持久告警状态、额外时钟定时器或自动重试。
 
-`device_query_clock()` 仍保留给显式参考时钟查询、Device Settings 刷新和配置 writeback 路径；只有当实测证明 `device_query_state()` 不能可靠反馈锁定状态时，才应考虑把 clock snapshot 作为设备实时状态的窄字段扩展。
+这里的 warning 消失只表示单次告警已消费，不表示执行了新的锁定状态查询。运行中拔掉外参考后的持续检测不在本次范围。恢复与结果回写详见 [htra_reference_clock_integration.md](htra_reference_clock_integration.md)。
 
 ### 5.2 DeviceInfoWidget 的队列与循环播放
 
@@ -308,7 +309,7 @@ External 参考源下的 RLO15 使用状态型 warning，而不是普通一次�
 - RLO 不依赖 `addWarnningMessage()`
 - RLO 小指示不等于 warning 队列
 - RLO 的显隐由每次实时状态刷新直接覆盖，因此 warning 消失后会自然隐藏
-- 当前只有 External 参考源下的 RLO15 会被 controller 额外映射成可自动移除的滚动 warning
+- RLO15 会被 controller 额外映射成可自动移除的滚动 warning；显示不受恢复后的参考源属性影响
 
 这也是为什么 `FancyDevice::warningCategory()` 把 RLO 类 warning 归为 `Ignorable` 后，RLO 小指示依旧可以工作。
 
@@ -336,7 +337,7 @@ External 参考源下的 RLO15 使用状态型 warning，而不是普通一次�
 其中：
 
 - `15/16/17/18` 仍会驱动 `RLOxx` 小指示
-- External 参考源下的 `15 / STATUS_WARNING_SYSCLK_UNLOCKED` 会额外驱动滚动文案 `External reference clock not locked.`
+- `15 / H2_WARNING_SYSCLK_UNLOCKED` 会额外驱动短暂滚动文案 `External reference clock not locked.`，下一次不含 15 的状态快照移除文案
 - `99 / STATUS_WARNING_UNLEVEL` 已改为 `CommonPanel Level` 的局部 badge 状态
 
 更多 `Level` 按钮的本地 badge 处理见 [commonpanel_level_unlevel_badge_ui.md](commonpanel_level_unlevel_badge_ui.md)。

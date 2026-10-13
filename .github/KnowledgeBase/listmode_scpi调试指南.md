@@ -1,6 +1,10 @@
 # ListMode SCPI 命令与 R&S 兼容调试指南
 
-适用版本：2026-09-07 当前实现。范围为 MScan/ListMode 的 36 个命令头（设置、查询分别计数）及调试所需公共命令，不是整机全部 SCPI 命令手册。
+基础版本：2026-09-07 实现。范围为 MScan/ListMode 的 36 个命令头（设置、查询分别计数）及调试所需公共命令，不是整机全部 SCPI 命令手册。
+
+2026-10-08 当前限制：因 MScan 暂不可用，SCPI 暂时禁止选择 MScan。`[SENSe:]SWEep:MODE` 只接受 `FREQ` / `POWER`，`[SOURce1:]FREQuency:MODE` 只接受 `CW`；两处设置 `LIST` 均由参数解析器拒绝，保留原状态。旧配置若恢复了 List，`SWEep:STATe ON` 返回 `-221`，需先选择 FREQ / POWER；`SWEep:STATe OFF` 和 `FREQuency:MODE CW` 仍可退出扫描。模式查询继续反映现有状态，List 草稿接口仍保留。下文涉及进入 LIST 和启动 MScan 的命令组合是历史调试流程，当前不能用于启动。
+
+Freq / Power 扫描使能已接通 `StepSweepPanel::triggerBtnEnabledChecked -> setBtnEnabledChecked -> enabledChanged`，复用 MainWindow 的 carrier 选择和发射请求链路。可使用 `SWEep:MODE FREQ`（或 `POWER`）、`SWEep:STATe ON` / `OFF` 和 `SWEep:STATe?`；使能表示提交现有扫描意图，不是异步硬件执行完成的证明。
 
 ## 1. 端口调试助手的使用方式
 

@@ -7,10 +7,10 @@
 原先设备相关设置入口是分散的：
 ## 2. 当前 UI 承载方式
 
-当前 Device Settings 不再是独立弹窗，而是主窗口中的 standalone page。
+当前 Device Settings 不再是独立弹窗。桌面 `--ui-mode=main` 使用主窗口中的 standalone page；`--ui-mode=instrument` 通过 Home → System 分类入口进入设备设置页面。
 
-- 入口位于 CommonPanel，放在 Sweep 按钮右侧。
-- 点击入口后，由 MainWindow 切换到 FancyTabWidget 的 standalone page。
+- 桌面 Main 的入口位于 CommonPanel，放在 Sweep 按钮右侧；点击后由 MainWindow 切换到 FancyTabWidget 的 standalone page。
+- Instrument 的唯一设备设置面板由 `InstrumentSystemWidget` 的内容页持有，不注册为 FancyTabWidget 的 standalone page；分类入口显示当前设置摘要。
 - 页面本体实现为 `DeviceSettingPanel : Core::Panel`，而不是 `Controls::Dialog`。
 
 这样做的原因是：
@@ -21,7 +21,7 @@
 
 ## 3. 页面结构
 
-当前页面使用 2 列 Grid，顶部仍是 2x2 主布局，右下角 `RF Hardware` 下方再追加一个独立 group：
+桌面 Main 页面使用 2 列 Grid，顶部仍是 2x2 主布局，右下角 `RF Hardware` 下方再追加一个独立 group：
 
 - Reference Clock
 - Trigger In
@@ -30,6 +30,8 @@
 - Fan Control
 
 各 group 的当前语义如下。
+
+Instrument 复用同一份 property 绑定和设备快捷接口，内容分为参考时钟、触发与同步、射频与硬件三个分类；触发分类使用输入/输出 Tab，其余单页。参数按钮约 96 px 高，RefOut、Trigger Output、Low Power 使用横向 SwitchButton；main 保留原 LabelButton 与 GroupBox 布局。debug-only 风扇模式和阈值继续位于射频硬件分类，非 debug 时隐藏。共用标题/Back，分类返回 System，再返回 Home。当前方案见 [System 分类页面与 Tab 设计](instrument_system_category_dialog_design.md)；此前四列平铺布局见 [旧 Home / Main 设计](<5寸屏幕的Home Main 交互设计.md>)。当前仅静态检查，未运行验收。
 
 ### 3.1 Reference Clock
 
@@ -104,7 +106,7 @@
 
 ### 3.6 布局细节
 
-当前页面还有两个刻意的布局约束：
+桌面 Main 页面还有两个刻意的布局约束：
 
 - 每个 group 的高度按内部真实控件高度收紧，不主动吃掉页面多余空间。
 - 对于某一行只有一个控件的场景，该控件只占左半区域，右半保持留白，不横向铺满整行。

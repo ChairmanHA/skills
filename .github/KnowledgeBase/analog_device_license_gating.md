@@ -256,10 +256,12 @@ Analog 插件初始化后，还会主动检查：
 
 1. 当前 panel 重新 `setEnabled(true)`
 2. 若已有数据 ready，则 `onDataStatusChanged(true)` 恢复按钮状态
-3. 若该业务当前处于 active，则主动调用 `requestGenerateData()` 重新生成一次
+3. 若数据尚未 ready，且该业务是当前已使能的 `BusinessManager::selectedEntryBusiness()`、旧链路 active 业务或可见页面，则主动调用 `requestGenerateData()` 补生成
 4. `AnalogModulationPlugin` 把受许可证控制的 Analog 数字类 item 重新加回 modulation list，顺序保持原注册顺序
 
 因此当前实现的产品语义是：
+
+2026-09-30 启动恢复修复：Digital、DSSS、OFDM 的 core-managed Playback 不会设置旧 `IBusiness::isActive()`，因此许可证通过后的补生成必须识别已使能的 selected business，不能只检查 active 或页面可见。三个生成器现在收到完整 `setGenerationPlan()` 即提交异步计算，已删除依赖页面 `widgetShowed` 的私有 `init()` 和首次初始化标记。恢复上次状态或用户预设时，即使当前展示其他页面，也能完成生成并通过 `providerExecutionContextChanged` 进入原有 TX 下发链；真正生成信号对象时仍校验设备许可证。RF/MOD 是否允许输出仍由统一 TX 运行时决定。
 
 - 启动和切设备过程中，Analog panel 可以继续浏览和编辑，但 `Save Data` 被禁用
 - 只有当新设备许可证最终判定失败后，Analog 数字类 item 才会从 modulation list 中隐藏

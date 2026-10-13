@@ -4,10 +4,10 @@
 
 StepSweep 的前端预校验现在是一个独立于真实发射流水线的编辑态链路：
 
-1. `StepSweepPanel` 在参数 `editingFinished`、`ListModePanel` Apply、以及 `currentDeviceOpenStateChanged(true)` 后触发 preview。
+1. `StepSweepPanel` 在参数 `editingFinished`、以及 `currentDeviceOpenStateChanged(true)` 后触发 preview；List Mode 编辑面板目前不在主界面初始化。
 2. `StepSweepPanel::previewCurrentCarrier()` 构造 `TxCarrierPlanContext + TxCommonSettings`。
 3. 当前设备通过 `IDevice::previewCarrierPlan()` 调用底层无副作用测试接口。
-4. 若设备返回了归一化结果，则先回写 UI。
+4. 若设备返回了归一化结果，则先回写扫频参数或 `MScanTableService` 的 Draft。
 5. 只有在 sweep `enabled=true` 时，归一化后的结果才继续上浮为 `argsChanged()` 参与 orchestrator / runtime。
 
 这条链路的目标只有一个：
@@ -19,7 +19,8 @@ StepSweep 的前端预校验现在是一个独立于真实发射流水线的编�
 ### ListMode 型号能力（2026-09-22）
 
 - 当前所有设备型号均支持 ListMode/MScan，因此 `TxCarrierCapabilities` 不再携带 `supportsListMode` 字段。
-- `StepSweepPanel` 始终保留 ListMode 入口；配置恢复和 `TxSessionService::canSelectCarrierPlan()` 不再按设备型号隐藏或拒绝 MScan。
+- `StepSweepPanel` 主界面目前只提供 Freq 和 Power 两个 Sweep Type 选项；List Mode 面板不创建。配置恢复和 `TxSessionService::canSelectCarrierPlan()` 不按设备型号拒绝 MScan，运行态链路仍保留。
+- 2026-10-08：SCPI 暂时禁止通过 `SWEep:MODE LIST` 和 `FREQuency:MODE LIST` 选择 MScan；旧配置恢复 List 时也拒绝 `SWEep:STATe ON`，保留 OFF / CW 的退出路径。限制位于 SCPI 输入边界，不改变 preview、配置格式或共享 carrier 能力规则。
 
 HTRA `FancyDevice::previewCarrierPlan()` 负责把统一的 carrier/common 语义收口到 H2 `tx_test_*` 系列 preview 接口。
 

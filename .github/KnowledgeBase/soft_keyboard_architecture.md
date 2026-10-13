@@ -232,14 +232,15 @@ Instrument 展示只改变这一层的视觉组织：`TouchNumKeyboard` 从创�
 - property 路径和 widget 路径共用同一个 `TouchNumKeyboard` / adapter / step controller 内核，但只有 property 路径会在 `prepareNumericKeyBoard(property, triggerObj)` 中把 `Step` 来源的 `editingFinished` 立即透传给业务属性。
 - 对纯 widget 路径，如果业务也需要“按 stepUp/stepDown 后立刻走设备/API 写回”，必须在调用侧显式监听 `BaseUnitAdapter::editingFinished` 并只对 `EditingTrigger::Step` 做即时回写；不要误以为 `keyboard->finished(Accepted)` 能自动覆盖这类需求。
 
-软键盘本身并不要求 parent 一定是 `MainWindow`。只要调用方传入的是仍然存活的
-`QWidget`，键盘就可以挂在对应 host 之下。
+软键盘创建时的 parent 不要求一定是 `MainWindow`，调用方仍传入存活的 trigger
+`QWidget`。Instrument 的呈现与定位宿主统一使用 GUIContext 注册的 MainWindow，
+其余模式继续按 preferred host / anchor window 解析宿主，见 6.9。
 
 对于 `QTableView` 这类“一个 QWidget 承载多个虚拟编辑单元”的控件，业务触发对象和位置锚点必须分开：
 
 - `prepareNumericKeyBoard(table, cfg)` 仍使用整个 item view 作为 trigger，使键盘关闭后的短时防重复点击覆盖 `viewport()`。
 - cell 本身不是 QWidget，可在 `table->viewport()` 下创建透明、无焦点的临时 child，并把几何设置为 `table->visualRect(index)`。
-- 在 `open()` 前调用 `TouchNumKeyboard::setAnchorWidget(cellAnchor)`，键盘即复用与 LabelButton 相同的 anchor 定位和屏幕钳位算法。
+- 在 `open()` 前调用 `TouchNumKeyboard::setAnchorWidget(cellAnchor)`，键盘即复用与 LabelButton 相同的模式定位和边界钳位算法；普通 Main 跟随 anchor，Instrument 固定主窗口右侧。
 - 临时 anchor 应随 keyboard 销毁清理；不要把 cell 的全局坐标硬编码进调用侧，否则滚动、多屏、DPI 和 Wayland visual geometry 会再次分叉。
 
 当前 Minibar 已经是独立 `SGStudioMiniBar` helper，不再存在 in-process
@@ -468,6 +469,23 @@ managed overlay。X11 目标机可能有 Composite 扩展但没有 compositor，
   形成桌面或其他控件的残影。
 - 这条规则只约束窗口呈现顺序，不要求预创建键盘、全局重绘、延时或安装 compositor。
 
+### 6.9 Instrument 数字键盘固定右侧
+
+自 2026-10-10 起，`TouchNumKeyboard` 的 `uiMode` 为 `instrument` 时，每次弹出
+统一贴齐 MainWindow client area 的右边缘、默认纵向居中，不随 Main、Home 或功能
+弹窗中的输入控件移动。位置由键盘自身计算：`x = hostWidth - keyboardWidth`，
+`y = (hostHeight - keyboardHeight) / 2`，再沿用既有 overlay / 屏幕边界钳位。
+
+- Instrument 的必需宿主是 `GUIContext::getMainWindow()`；MainWindow 构造时即注册。
+  功能弹窗不另作几何宿主，避免数字键盘被弹窗的较小区域裁切或改变初始位置。
+- Wayland 沿用 managed overlay，位置从主窗口映射到 overlay 本地坐标；Windows/X11
+  沿用顶层 `Qt::Tool`，使用对应全局坐标。两条路径都在键盘显示前设置最终位置。
+- overlay 宿主几何变化时重新对齐右侧。标题拖动仍沿用现有行为，重新打开则恢复固定
+  初始位置；没有新增状态、资源、输入路径或提交协议。
+- 普通 Main 和 helper-local 保留既有 preferred host / anchor 定位策略。此处只调整
+  数字键盘；普通文本键盘仍遵循第 10 节的贴底规则。
+
+
 ## 7. 维护建议
 
 后续如果还要扩展这套体系，建议遵守以下边界：
@@ -500,3 +518,17 @@ managed overlay。X11 目标机可能有 Composite 扩展但没有 compositor，
 The SCPI caller uses `PropertyBindingHelper::prepareNumericKeyBoard()` with an empty unit type, zero decimals, step 1, and range `0..65535`. The current port is copied into the adapter before presentation, and the selected line edit is updated only after an Accepted result. The line edit focus is cleared before `open()` so a Wayland input method cannot compete with the managed numeric keyboard. The existing `TouchNumKeyboard` presentation layer remains responsible for choosing its X11 top-level tool or Wayland hosted overlay.
 
 x86_64 builds do not install the SCPI port keyboard event filters and rely on their physical keyboard and mouse. Eligible non-x86_64 Tablet builds retain `Controls::Keyboard`; when that path is enabled, the same event filter must cover both SCPI port fields so their behavior cannot diverge again.
+
+## 10. Instrument 5 寸文本键盘
+
+`Controls::Keyboard` 是普通 `QLineEdit` 文本输入的键盘入口，与本篇前述带单位语义的 `TouchNumKeyboard` 分开。`Keyboard::showPopup()` 从 MainWindow 的 `uiMode` 属性分流：`instrument` 使用主窗口子 widget，其余模式继续走原有 Linux OSK0 / Popup 路径。Instrument 的主窗口合同是 1024×600 全屏；文本键盘高 340 px，显示时贴底并随主窗口宽度变化，按键 66 px 高。它不调用 `showNormal()` 或 OSK0，并禁用目标输入框的 Qt 输入法面板。
+
+Instrument 键盘由 `Keyboard` 单例管理，面板由 MainWindow 作为 QObject parent 持有。`QPointer<QLineEdit>` 记录当前目标；所有键帽 `NoFocus`，合成按键送到该目标。顶部回显是可聚焦的 `QLineEdit`：保存文件名输入框在点击释放并完成原事件处理后才唤出键盘，首次显示时目标光标置于文本末尾并聚焦回显；同一目标重复触发入口时保持回显焦点。触摸改变的光标/选区同步到目标，实体按键从回显转发给目标，目标变化再镜像回回显。字段名暂为“文件名”。主窗口、宿主对话框或目标输入框隐藏时收起，目标销毁后不再发键。字母页为 26 键 QWERTY，另有数字/符号页、Shift、退格连发、空格、连字符、句点、确认与收起；确认只收起键盘。符号页 `&` 键帽使用 Qt 按钮文字 `&&` 转义来显示字面量，点击时仍发送单个 `&`。
+
+键盘在 Instrument QSS 覆盖中指定尺寸和字号；键帽颜色、字体族、按下/选中态继承当前 Light/Dark 主题。整块面板显式绘制与字母区域普通 `QWidget` 相同的不透明底色（暗色 `#000000`、亮色 `#ffffff`），包含首行与 q 行之间的缝隙。顶部“文件名”标签没有自身背景色和边框；回显与 SaveFileDlg 的文件名输入框仍使用对应主题的对话框内容底色和边框色。Linux aarch64 的 `PxSaveFileDlg` 经 `WaylandDialogMoveTool` 托管为主窗口子控件，键盘作为后来显示并 `raise()` 的同级子控件覆盖其底部。保存动作只由对话框自己的 Save 按钮调用 `onConfirm()`。Windows 原生保存对话框是独立顶层窗口，未纳入此 5 寸设备的验收路径。
+
+### 点击事件尚未处理完时转移焦点
+
+最初在保存文件名 `QLineEdit` 的 `FocusIn`、`MouseButtonPress`、`TouchBegin` 事件过滤器中同步调用 `Keyboard::showPopup()`。键盘随即显示并聚焦回显，但原输入框还会继续处理这次点击，可能重新定位光标；重复触发入口时，旧的 `showInstrumentKeyboard()` 还会在判断键盘已显示之前再次聚焦原输入框。因此，单纯在显示键盘前把光标设到文本末尾，不能保证回显保留焦点和末尾光标。
+
+Instrument 保存文件名入口现在于 `MouseButtonRelease` 或 `TouchEnd` 投递 0 ms 回调，待原点击事件处理完成后再唤出键盘；已显示同一目标时直接同步并聚焦回显，不再先聚焦原输入框。用户于 2026-09-29 确认 Wayland 设备现场复测正确。此处保存对话框和键盘都是 MainWindow 的子控件，现场结果也支持点击事件时序这一原因；不应把本故障直接归因于 Wayland 禁止新顶层弹窗获取焦点。类似交互若要在点击后转移焦点，应先让原控件处理完该点击。

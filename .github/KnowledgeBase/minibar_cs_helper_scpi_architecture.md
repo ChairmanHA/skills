@@ -31,10 +31,10 @@ role and their existing presentation paths.
 ## ListMode MiniBar boundary (2026-08-24)
 
 - Sweep plan identity is transported by stable string IDs: `fscan`, `lscan`, `mscan`, and `unsupported`. Numeric `Sweep::SweepType` values never cross the IPC boundary.
-- `mscan` is included in `supportedPlanIds`. The helper may select ListMode, change its authoritative enabled state, and switch in all directions among Freq, Power, and List.
-- When ListMode is configured, the MiniBar Sweep button remains present and clickable, displays `List Mode`, and keeps the existing checked style as its enabled-state indication.
-- The ListMode Sweep popup keeps the ordinary Sweep title plus editable Enabled/Sweep Type controls. Only the numeric/table area is replaced by one centered row: `List scan editing is only supported in main-window mode.`
-- The ListMode table is not serialized to the helper. Its rows, range, and per-row/global dwell authoring remain owned by the main `StepSweepPanel/ListModePanel`; selecting List from the helper reuses that existing main-side table.
+- `mscan` remains in `supportedPlanIds` so the helper can reflect an externally selected MScan state. The Sweep Type menu offers only Freq and Power; it cannot select MScan.
+- When MScan is configured, the MiniBar Sweep button remains present and clickable, displays `List Mode`, and keeps the existing checked style as its enabled-state indication.
+- The MScan Sweep popup keeps the ordinary Sweep title plus editable Enabled/Sweep Type controls. The parameter area displays `MScan must be used in the full application.` The Sweep Type menu can switch from MScan to Freq or Power.
+- The MScan table is not serialized to the helper. Its Draft remains owned by main-side `MScanTableService`; the main-window ListModePanel is currently not initialized.
 - `unsupported` remains reserved for an unknown or genuinely unsupported future plan and must not be used as the ListMode identity.
 - `SweepSnapshot::available` describes MiniBar common Sweep authoring support, not the device's instantaneous open state: it is true when the main Sweep panel exists and the configured plan is Freq, Power, or List. Device open state remains an independent snapshot/lifecycle concern.
 - Sweep snapshots and revisioned complete-state requests always carry Enabled, selected plan, retained Freq parameters, retained Power parameters, and shared analog dwell. List table contents stay main-only. Consequently, main-side scalar edits advance the Sweep revision, stale helper writes conflict/rebase, and an accepted response returns the authoritative scalar state without either UI keeping a second parameter truth.

@@ -82,13 +82,18 @@
 - 从 `updater/` 下按平台精确查找 updater：Windows 为 `updater.exe`，Linux 为 `updater`。
 - 从 `bin/` 下查找 maintenance；maintenance 或 updater 任一缺失时整包无效并清理工作区。
 
-`version.json` 当前同时支持两代固件元数据：
+`version.json` 当前支持以下固件元数据：
 
-- 旧格式只有顶层 `FPGA / MCU / FX3 / EIO`。`PacketSpec` 将它们作为无条件目标继续读取。
-- 新格式使用 `SchemaVersion: 2` 和 `Firmware` 节点。顶层字段继续保留，既供旧客户端读取，也作为设备未连接或选件查询不可用时的明确默认值。
-- `Firmware.SelectorOptions` 最多声明两个真正影响固件选择的 H2 选件号；当前只启用 `OPTION_BW_320M_TX = 53`，解析器已经可以在将来接收选件 `73` 及 `{53, 73}` 组合。
-- 每个 `Firmware.Profiles[]` 使用 `PresentSelectorOptions` 声明一个精确选件组合，并携带一整组 `FPGA / MCU / BUS / EIO` 目标版本。运行时先把设备的完整选件集合与 `SelectorOptions` 求交集，再做精确匹配；不按 `Model` 选择，也不使用优先级或模糊规则。
-- 新格式只要存在就必须完整有效；schema 错误、重复组合或组件版本缺失会使整包解析失败，不能静默退回旧字段。
+- 旧格式只有顶层 `FPGA / MCU / FX3 / EIO`，可不声明 SchemaVersion，也可显式声明 `1`。`PacketSpec` 将它们作为无条件目标继续读取。Schema 1 若携带旧 Firmware/Profiles，仍按旧全局选件表读取。
+- 当前综合格式使用 `SchemaVersion: 2` 和 `Firmware` 节点，正式格式演进按用户确认的 1 -> 2 处理；未独立提交的中间方案不计入编号，先前写为 3 的方案已修正。按“型号默认版本 + 型号下的选件特殊版本”统一选择，没有策略切换开关。顶层四组件版本继续作为无可用设备时的包默认目标。
+- `Firmware.ModelProfiles[]` 每条包含唯一 `Id`、正整数 `Model`（quint16 范围）及完整 `Components`，后者定义该型号默认版本。使用 Core capability snapshot 的原始型号精确匹配，不使用型号显示别名。122、123、132 分别有独立配置，默认和特殊版本均可按型号单独修改。
+- 每个型号的可选 `OptionProfiles[]` 声明该型号的特殊版本，每条包含唯一 `Id`、非空 `PresentSelectorOptions` 和完整 `Components`。缺失或空 OptionProfiles 表表示仅使用型号默认；特殊目标必须完整声明四个组件，不做组件级继承。
+- `Firmware.OptionNamespace` 和 `SelectorOptions` 定义选件编号体系及参与选择的选件号。SelectorOptions 最多两个，当前为 `OPTION_BW_320M_TX = 53`。先与设备完整选件集求交集，再在当前型号的 OptionProfiles 内精确匹配；未命中时使用该型号默认版本，不跨型号、不用优先级或子集匹配。
+- 选件查询不可用时使用该型号默认；没有可用设备时使用顶层默认；已知型号未配置时失败。schema 错误、非法/重复型号、重复组合、空/重复 Id、特殊组合为空或组件缺失使整包解析失败。存在但解析失败的本地默认清单同样禁止更新；缺失本地清单仍保留既有显示 `-` 的降级行为。
+- 新客户端按声明版本和字段结构解析：Schema 2 存在 `ModelProfiles` 时优先且严格读取型号表；有但无效时失败，不退回 Profiles。没有 ModelProfiles 的旧包按 `Firmware.Profiles` 读取，内部适配为 model=0 的旧包对象，复用同一 resolver；选件查询不可用时使用顶层默认，已知组合没有 Profile 时仍按旧契约失败。型号表禁止 Model=0。
+- 当前清单同时保留旧 `Firmware.Profiles` 作为兼容视图，恢复型号修改前的历史全局选件表：[] / [53] 的 MCU 为 2.0.30 / 2.0.32，FPGA/BUS/EIO 为 2.0.22 / 2.0.1 / 0.1.29。它有实际旧二进制消费者，不是新型号规则的另一份实现；新客户端使用 ModelProfiles，旧客户端只能继续展示原全局选件目标，升级后才有型号细分。
+- 2026-10-09 核实的兼容缺陷有两处：仓库旧选件读取器固定要求字面值 SchemaVersion=2；Firmware.Profiles 还必须非空。因此只把 3 改为 2 不足以修复，必须恢复旧字段。读取失败会从 parseVersionFile 传播至 parseScratchWorkspace，使下载/本地归档包无效。更早只读顶层字段的客户端会忽略新增字段，也可继续读取当前清单。
+- 历史源码实际存在字面值 2 的旧选件格式；这是已存在的读取契约，与用户确认的正式发布格式代次分别记录。新客户端支持声明 1/2 和无声明的顶层旧格式，不为取消的 3 保留猜测式兼容。未声明版本却有 Firmware、未知版本等仍按错误处理。
 
 ### H2 选件命名空间过渡约定（2026-09-10）
 
@@ -97,16 +102,19 @@
 可使用任一名称；其他命名空间仍按原有区分大小写的精确相等规则比较。
 
 当前 `package-info/version.json` 和 HTRA 的 `kH2OptionNamespace` 均继续使用
-`harogic.h2`，以便尚未安装过渡版、严格匹配旧名称的客户端仍可读取本阶段更新包。
-目标固件显示、Update 按钮门控和更新启动检查共用上述解析入口；Schema 2 必填校验、
-未知选件默认路径及 Profile 精确匹配规则不变。
+`harogic.h2`，与旧读取器及新型号表共用同一编号体系。H2 旧名称兼容继续保留。
+目标固件显示、Update 按钮门控和更新启动检查共用上述解析入口。选件已知且当前型号有
+特殊 Profile 时检查命名空间；命名空间不兼容时失败，不能把另一体系的编号解释为 H2 选件。
 
 后续切换为 `h2` 前，先确保需要通过更新链升级的客户端已安装此过渡版，再同步修改
 包清单和 HTRA 上报常量。旧名称兼容的移除应在不再需要读取旧包后单独安排；
 不在本阶段切换名称或删除兼容。后续如配置了 `device_info.xml` 的 `optionNamespace`
 型号别名规则，也需核对其名称；该配置匹配不使用 Updater 的别名兼容逻辑。
 
-当前包的默认 FPGA 是 `2.0.20`；选件已知时，无 53 档显示 `2.0.14`，含 53 档显示 `2.0.19`。
+默认版本编辑 `ModelProfiles[].Components`；选件特殊版本编辑该型号的
+`OptionProfiles[].Components`。各型号及其特殊目标独立配置，具体版本以
+`package-info/version.json` 当前内容为准；顶层字段用于无可用设备的默认展示。兼容 Profiles
+保留旧客户端原有全局视图，不能表达各型号不同的版本；新型号版本不从这张旧表派生。
 
 在线和本地文件都使用这套 `PacketSpec` 解压/解析契约；远端加载只有
 `UpdateDialog` 的 `Download` 点击入口。当前远端下载地址仍由代码和 CMake 宏拼接，不再读取
@@ -157,14 +165,18 @@
 - `FPGA` / `MCU` / `BUS` / `EIO` 来自 `currentDevice->getDeviceInfo()` 里的设备开机快照。
 - 如果设备本身没有 EIO 选件，底层 `DeviceInfo.EIOVersion` 可能就是 `0`，此时 `UpdateDialog` 显示 `0.0.0` 属于预期行为，不应按 updater UI bug 处理。
 
-`Target` 固件列不是当前设备快照，而是 `PacketSpec` 对当前设备选件快照解析出的包目标：
+`Target` 固件列由 `PacketSpec` 按型号、选件和当前设备能力快照解析：
 
 - `FancyDevice` 复用设备 open 阶段已有的 `device_query_options()`，把“查询是否成功、选件命名空间、完整选件号集合”放进 Core capability snapshot。
+- `DeviceManager` 同时从 `DeviceInfo.Model` 发布快照的 `model`；resolver 接收完整的 `CurrentDeviceCapabilitySnapshot`，不新增 Core/HTRA 状态。
 - `UpdateDialog` 订阅 `currentDeviceCapabilitiesChanged`；设备切换、重新 open 或包来源变化时会重新解析目标。
-- 当前设备选件已知时按新 Profile 精确匹配；型号 122/132 不参与判断。
-- 没有当前设备或选件查询失败时，使用顶层旧字段作为包默认目标，因此当前 FPGA 显示 `2.0.19`。
-- 选件已知但新包没有精确 Profile 时，固件目标显示 `-` 并禁用 Update，避免元数据缺失时猜测。
+- Schema 2 型号表先匹配型号默认，再查该型号下的特殊选件组合；查询失败或没有配置特殊组合时使用该型号默认。兼容 Profiles 不参与这条路径，132 即使带 53 也使用其自身默认，未知型号不能借旧表继续更新。
+- 无可用设备时使用顶层默认值。旧全局选件包的查询失败也继续使用顶层默认。
+- 已知型号没有配置、选件 namespace 不兼容，或旧全局选件包缺少精确组合时，固件目标显示 `-`、tooltip 显示具体失败原因，并禁用 Update。
 - Profile ID 作为目标固件字段的 tooltip 提供诊断，不新增 maintenance 参数。
+
+此规则控制清单中的目标版本解析及更新门控；实际刷写仍由外部 updater 使用现有设备参数执行，
+不根据 JSON Profile 传入额外镜像选择参数。
 
 `Local Default` 的目标包元数据则走另一条链路：
 
@@ -172,12 +184,12 @@
 - 它会读取当前运行时安装根目录下的 `version.json` 和 `releasenote.txt`。
 - 这两个文件来自 `package-info/` 的配置阶段拷贝；在 `repo-root` 运行布局下，它们会被放到仓库根运行时目录，在 `build-tree` 布局下则会被放到 build 根目录。
 - 因此 `Local Default` 的 `Version / Software / FPGA / MCU / BUS / EIO` 目标值，当前以运行时 `version.json` 为准，而不是以 updater 专用 firmware 编译期宏为准。
-- 新格式的本地目标同样会根据当前设备选件选择 Profile；无设备时读取顶层默认字段。
+- 新格式的本地目标同样按型号默认及该型号下的选件 Profile 解析；无可用设备时读取顶层默认字段。
 - updater 不再需要单独携带 `FPGA_VERSION` / `MCU_VERSION` / `BUS_VERSION` / `EIO_VERSION` 这几条 firmware 编译期宏。
 - 如果运行时根目录缺少 `version.json`，`Local Default` 仍可继续作为可更新源存在，但本地 firmware 目标字段只会回退为 `-`，这是运行时元数据缺失而不是设备信息链路问题。
 
 软件版本只用于展示，不参与 `Update` 按钮门控。硬门控仍是包有效、maintenance/updater
-存在、当前设备选件对应的固件 Profile 能够解析，以及当前没有重复更新事务。
+存在、当前设备型号与选件对应的固件目标能够解析，以及当前没有重复更新事务。
 
 点击 `Update` 后，`UpdateDialog` 会构造 maintenance 参数。
 
