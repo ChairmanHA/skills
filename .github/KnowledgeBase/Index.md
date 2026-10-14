@@ -102,7 +102,7 @@ Get-Content -Encoding UTF8 -LiteralPath "$kb\listmode_scpi调试指南.md" | Sel
 
 - [入口：SCPI 接入审阅与方案](scpi_review_and_integration_plan.md)：TX/UI 回写、错误语义、ScpiIntentService 迁移。
 - [ListMode 命令调试入口](listmode_scpi调试指南.md)：TCP 5025、命令表、查询响应、SCPI 临时 MScan 限制与历史 R&S 实测流程。
-- [ListMode 接口设计](listmode接口实现.md)：MScan、真实执行与兼容映射边界。
+- [ListMode 接口设计](listmode接口实现.md)：MScan Draft/Submitted/Applied、数据 Apply 与设备执行分离、真实执行与兼容映射边界。
 - [R&S List Mode 参考](rs_list_mode_scpi_reference.md)：R&S 的 listmode scpi命令、触发、索引、学习与文件容器。
 
 ## F-sweep
@@ -120,14 +120,15 @@ Get-Content -Encoding UTF8 -LiteralPath "$kb\listmode_scpi调试指南.md" | Sel
 
 ## H-ui
 
+- [Instrument 模式设计原则与交互总览](instrument_ui_mode_design_principles_and_interaction.md)：SMA100B 借鉴、Home 摘要表、Waveform 四列三行与 13 类字段表、五幅 Mermaid 页面图与操作说明、System 六类与 Back、Waveform/MOD 同目标、MScan 数据 Apply；当前实现/验收边界。
 - [QSS 入口](QSS_Best_Practices.md)：样式编写与工程约定。
 - [LabelButton 状态样式](labelbutton_style_state_workflow.md)：InfoButton、刷新链、RF / Settings / Sweep。
 - [双行按钮空间限制](labelbutton_dual_row_vertical_space_limit.md)：padding / labelMargins；[5 寸字号与物理换算](<5 寸 1024×600 的物理换算（“模拟”基线）.md>)：instrument 24px / 64px 参数按钮与真机验收边界。
 - [Level UNLEVEL badge](commonpanel_level_unlevel_badge_ui.md)：CommonPanel 局部标记。
-- [Auto Mod 用户意图](auto_mod_user_intent_boundary.md)：FancyTabWidget 信号与 MOD availability。
+- [Auto Mod 用户意图](auto_mod_user_intent_boundary.md)：FancyTabWidget 用户信号、main / Instrument MOD availability、外部使能请求与 Home 概要目标。
 - [调制列表响应式布局](fancytabwidget_modulation_list_responsive_layout.md)：单/双列、宽度与滚动条。
 - [TitleBar 菜单与溢出](titlebar_menubar_outputmode_and_overflow_behavior.md)：central grid 接入、输出模式、工具组、重复触摸。
-- [Instrument 窗口平台行为](instrument_ui_mode_platform_window_behavior.md)：树莓派主屏 1024×600 自动启动、显式 ui-mode 优先、QWindowKit 归属与全屏合同；[SMA100B 风格 Home / 配置导航](instrument_home_sma100b_layout_and_navigation.md)：Home 状态摘要四行两列、Sweep 卡片内方形绿色开关及右侧 Back，System 配置使用分类页面；仅静态核对，未真机验收；[旧 Home / Main 历史](<5寸屏幕的Home Main 交互设计.md>)：设置 Home、全宽 Main、悬浮导航与类型弹窗。
+- [Instrument 窗口平台行为](instrument_ui_mode_platform_window_behavior.md)：树莓派主屏 1024×600 自动启动、显式 ui-mode 优先、QWindowKit 归属与全屏合同；[SMA100B 风格 Home / 配置导航](instrument_home_sma100b_layout_and_navigation.md)：Home Sweep 只读 ON/OFF、MScan 无数据/未 Apply/文件路径摘要、右侧 Back 与 System 分类页面；仅静态核对，未真机验收；[旧 Home / Main 历史](<5寸屏幕的Home Main 交互设计.md>)：设置 Home、全宽 Main、悬浮导航与类型弹窗。
 - [Instrument System 分类页面 / Tab](instrument_system_category_dialog_design.md)：六类入口、当前值摘要、配置单页、主题蓝色 Tab 和逐层 Back；Excel 翻译暂缓。[Stacked 切页动态 Popup 禁绘陷阱](qt_stacked_layout_dynamic_popup_updates_disabled.md)：Win32 / Wayland 共同根因、visible/exposed 但无 Paint 的判据、创建时机与修复边界。
 - [Windows 主窗最小尺寸](mainwindow_frameless_minimum_size_contract.md)：QWindowKit 迁移后暴露的 List Sweep 隐藏布局缓存、标题栏宽度汇总与 native resize 合约。
 - [Wayland Panel 高度与启动时序坑](mainwindow_panel_minimum_height_wayland_contract.md)：延迟 show、隐藏窗口临时几何、发行版 Qt 与自带标准 Qt 的补丁差异、Wayland 全屏状态栏裁切。
@@ -156,7 +157,7 @@ Get-Content -Encoding UTF8 -LiteralPath "$kb\listmode_scpi调试指南.md" | Sel
 - [入口：CMake 工作流](cmake_build_output_clean_run_workflow.md)：configure / build / 输出 / 清理。
 - [运行布局](runtime_layout_repo_root_vs_build_tree.md)：SGS_RUNTIME_LAYOUT、repo-root / build-tree、插件 staging。
 - [Windows clone 到 stage](windows_cmake_clone_build_stage_guide.md)：环境准备、依赖归属与交付包。
-- [打包脚本与水印](build_script_packaging_and_watermark_guide.md)：Windows/Linux 参数、rebuild 与归档。
+- [打包脚本与水印](build_script_packaging_and_watermark_guide.md)：Windows/Linux 参数、含 BNC 的批量矩阵、rebuild 与归档。
 - [build.bat 打包依赖](windows_build_bat_updater_packaging_hygiene.md)：updater / 3rdParty 增量构建。
 - [MSVC 运行库打包](windows_stage_msvc_runtime_packaging_strategy.md)：runtime / UCRT / vc_redist 边界。
 - [Qt 混装与 SVG 失效](windows_qt_runtime_mixing_pitfall.md)：DLL 来源与 Debug/Release 差异。
@@ -166,7 +167,7 @@ Get-Content -Encoding UTF8 -LiteralPath "$kb\listmode_scpi调试指南.md" | Sel
 
 ## K-linux
 
-- [入口：Linux 构建发布](linux_build_package_unified_entry.md)：250 / 108 两入口、Raspberry Pi / RK3588 共用包、直接启动。
+- [入口：Linux 构建发布](linux_build_package_unified_entry.md)：250 / 108 两入口、VMware 批量构建、Raspberry Pi / RK3588 共用包、直接启动。
 - [AArch64 兼容性](raspberry_pi_132_build_host_250_compatibility.md)：ABI、Qt、Wayland/xcb 与双目标验收。
 - [x86_64 X11 与 Wayland 迁移方案](linux_x86_64_x11_and_future_labwc_wayland.md)：当前 xcb/QWindowKit 主窗边界、未来 labwc artifact。
 - [RPATH](RPATH_MECHANISM.md)：$ORIGIN 相对库路径。
@@ -174,7 +175,7 @@ Get-Content -Encoding UTF8 -LiteralPath "$kb\listmode_scpi调试指南.md" | Sel
 
 ## L-updater
 
-- [入口：Updater 当前实现](updater_firmware_update_mechanism.md)：下载、version.json、型号默认/选件特殊版本、Schema 1/2 与旧读取器兼容、H2 命名空间过渡、maintenance。
+- [入口：Updater 当前实现](updater_firmware_update_mechanism.md)：在线/离线版本策略、下载、version.json、型号默认/选件特殊版本、Schema 1/2 与旧读取器兼容、H2 命名空间过渡、maintenance。
 - [Updater 整改重点](updater_mechanism_gap_and_remediation.md)：已收敛行为、剩余问题与验收。
 - [Standard CN 远程更新联测](standard_cn_remote_manual_update_test_guide.md)：发布 URL、包结构、手工下载与回滚。
 - [A/B 顺序固件更新分析](shared_chassis_ab_sequential_updater_analysis.md)：共享 IP 概率失败、待取证假设。

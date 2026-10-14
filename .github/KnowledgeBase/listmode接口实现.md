@@ -59,6 +59,12 @@
 
 Draft、Submitted、Applied 和上述 Compatibility State 的拥有者为 Core 级 `MScanTableService`。`ListModePanel` 和 SCPI 都是它的客户端；SCPI 不调用面板。设备提交仍通过 `TxSessionService` 完成。
 
+2026-10-13：Instrument Home 的 MScan 概要使用 `previewSubmittedSnapshot()` 作只读提交预览，与 `prepareSubmittedSnapshot()` 共用原列长、范围、选中点数和设备能力校验。预览成功只返回候选点表及 Draft/设备版本，不分配 submission token、不修改 Submitted/Applied，也不触发发射；失败保留调用方输出值并返回原 MScanResult。Home 据此提示无法使能和编辑未 Apply，不能为刷新概要调用真正的 prepare 方法。原 Apply/ON 提交行为及 SCPI 限制保持现状。
+
+数据 Apply 与设备执行确认是两个阶段：编辑页 Apply 完成 Draft → Submitted 的数据提交，RF OFF 时也可以成功；Home 的 `Data applied` 只表示 Submitted.valid 且其 draftRevision 与当前 Draft 一致，不依赖 RF、扫描 Enabled 或 Applied。设备 UID/capability 的运行态绑定检查继续留在原提交/执行链路，不归入“用户有新编辑未 Apply”的判断。设备成功后的实际点表仍记录到 Applied / runtime effective request。
+
+MScan 的运行态 `applyCarrierPlanWriteback()` 不再把设备点值写进编辑表或重新发布 Draft；编辑态 preview 的归一化保留。此前 H2 的 float 功率/dwell 回读经该 UI 路径改变 double Draft，产生新 revision，但 Apply 按钮被 preview guard 抑制，导致用户已经 Apply 后开启 RF 又提示需要 Apply、必须先编辑一行。该边界错误已修复，不加浮点容差、不自动重提，用户在执行期间的新编辑也不再被运行态回写覆盖。见 [修复 TaskLog](../TaskLog/2026-10-13_separate-mscan-data-apply-from-device-confirm.md)。
+
 CarrierPlan/FrequencyMode/Running 状态由 `TxSessionService` 统一持有，普通 UI refresh 不得从面板反推并覆盖它；List Trigger 直接读写唯一的 `CommonDeviceProfile` trigger source/count/action。`MScanTableService` 不保存这两类状态，也不提供 request-local trigger decorator。
 
 复位默认值：

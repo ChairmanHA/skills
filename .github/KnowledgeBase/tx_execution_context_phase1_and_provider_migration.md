@@ -167,13 +167,15 @@ runtime 现在拿到的是“已裁决的 pipeline + 同一时刻采集的执行
 
 1. `carrierPlanKind()`：把 `Freq / Power / List` 映射成 `FScan / LScan / MScan`
 2. `fillCarrierPlanContext()`：把 UI 输入转换为统一 `TxCarrierPlanContext`
-3. `applyCarrierPlanWriteback()`：把 runtime 返回的 sweep 生效值回写给 UI
+3. `applyCarrierPlanWriteback()`：FScan/LScan 把 runtime 生效值回写给 UI；MScan 实际点值记录在 Core 的 Applied，不改写编辑草稿
 
 其中 `MScan` 的 request 构造行为是：
 
-1. 仍然以 `ListModePanel` 作为 authoring 真相源
-2. 进入 request 前，按 `rangeFrom / rangeTo` 截出本次实际 apply 的有效点表
-3. 仅把有效点表写入 `mscanPoints`
+1. `ListModePanel` 是编辑客户端，Core `MScanTableService` 拥有 Draft / Submitted / Applied
+2. 数据 Apply 时校验并按范围生成不可变 Submitted；构造 request 直接读取该提交，后续编辑不改变已提交点表
+3. 运行态成功更新 Applied / effective request，不再将设备 float 功率/dwell 回读作为新编辑发布 Draft；编辑态 preview 的归一化保留
+
+2026-10-13：Home 的 Data applied 表示 Draft → Submitted 完成，不依赖 RF 输出或设备 Applied；数据提交与设备执行阶段保持独立。该边界修复避免已 Apply 的数据在 RF 开启后因设备精度回读被再次标记为未 Apply，并保留执行期间的新编辑。详见 [MScan 状态模型](listmode接口实现.md#3-状态模型)。
 
 另外，`StepSweepPanel::argsChanged` 当前已经加上 enabled 态门控：
 
@@ -256,7 +258,7 @@ runtime 现在拿到的是“已裁决的 pipeline + 同一时刻采集的执行
 4. `applyFixedPlayback()` 先执行 Playback Phase 1（基础配置），payload ready 后再执行下载/触发
 5. `applySweepPlayback()` 执行 `Playback + FScan / LScan / MScan`
 6. `querySweepWriteback()` 在 sweep 成功后立即查询设备实际 sweep 参数
-7. `sweepConfigurationDone(...)` 把 sweep 生效值回写给 `StepSweepPanel`
+7. `sweepConfigurationDone(...)` 把 sweep 生效值交给 `StepSweepPanel`；F/L 值回写编辑 profile，MScan 点表由后续成功结果记录到 Applied
 8. `requestApply()` 在执行前校验 request 的设备 UID、capability revision，以及 Playback 采样率/容量
 9. 新 payload 通过同步 `downloadDataSequence()` 下发；SDK 返回后无论成功或失败都立即释放共享 host storage
 10. 下载成功后只保留 payload identity、word count、设备 UID 和 capability revision；相同 payload 再次 apply 时复用设备已驻留波形，不要求业务重新持有125/1000 MiB内存
@@ -312,6 +314,7 @@ core-managed 的 `TxSessionService::appliedRequest()` 是已吸收设备确认 L
 
 6. `TxPipelineRuntime::sweepConfigurationDone -> StepSweepPanel::applyCarrierPlanWriteback(...)`
    - runtime 只在 sweep 真正成功后才查询并回写 sweep 生效值
+   - MScan 运行态点值不写入 Draft；`applyStateChanged -> TxSessionService::publishAppliedRequest -> MScanTableService::recordApplied` 保持实际执行结果
 
 7. minibar 的软键盘 host 边界已经过实测验证
    - `prepareNumericKeyBoard(property, triggerObj)` 在 minibar 模式下不依赖 `MainWindow`

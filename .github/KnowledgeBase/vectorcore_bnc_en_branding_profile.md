@@ -28,8 +28,11 @@ option is hidden in the update dialog, and any shared "open online update" entry
 falls back to selecting `Local Default` so the hidden online source cannot expose
 the `Download` button. The download slots, refresh logic, packet mappings, and
 execution paths remain the shared implementation. The existing `Local Default`
-and `Local File` choices remain unchanged. Other packet profiles retain the
-visible three-mode updater.
+and `Local File` choices remain unchanged. Neutral CN/EN and the Russian edition
+now share this offline policy and default to `Local Default`; ordinary Standard
+CN/EN retain the visible three-mode updater. Updater's private
+`SGS_UPDATER_OFFLINE_ONLY` build definition owns this policy, including the
+existing startup ETH Connect dialog exception.
 
 ## Resources and theme boundary
 
@@ -69,8 +72,11 @@ scripts/build_pi.sh aarch64 BNC en --watermark off
 ```
 
 When no archive name is supplied, all three entries default to `VectorCore`.
-The Windows `build_all.bat` matrix intentionally excludes `BNC en`; this special
-edition must be built explicitly only when requested. Raspberry Pi BNC packages
+On `api2.0.36` and `dev`, the Windows `build_all.bat` matrix includes `BNC en` as its sixth
+target, defaulting to `VectorCore.zip` unless a global archive name is supplied.
+Both branches' Linux `build_all.sh` includes `BNC en` for both `ubuntu-x86_64`
+and `raspberry-pi`, defaulting to `VectorCore.tar.gz`.
+Raspberry Pi BNC packages
 contain `launch_pi.sh`, rendered during packaging to launch only
 `bin/VectorCore` relative to the package root; no SGStudio executable or install
 path fallback remains in that launcher.

@@ -68,12 +68,14 @@ scripts\build.bat standard cn SGStudio --rebuild ^
 scripts\build_all.bat --watermark off
 ```
 
-该入口依次对 `standard cn/en/ru` 与 `neutral cn/en` 做全量重建。BNC/VectorCore
-是按需构建的特殊版本，不在 `build_all.bat` 矩阵中；需要时单独调用
-`scripts\build.bat BNC en --rebuild --watermark off`。
+该入口依次对 `standard cn/en/ru`、`neutral cn/en` 和 `BNC en` 做全量重建，
+共六包；`api2.0.36` 和 `dev` 均已包含 BNC/VectorCore。
+需要单独构建 BNC 时仍可调用 `scripts\build.bat BNC en --rebuild --watermark off`。
 
-不传入全局 archive name 时，standard 三种语言生成 `SGStudio.zip`，neutral
-两种语言生成 `VSG.zip`。
+不传入全局 archive name 时，standard cn/en 生成 `SGStudio.zip`，standard ru
+生成 `SGStudio_russia.zip`，neutral 两种语言生成 `VSG.zip`，BNC en 生成
+`VectorCore.zip`。Linux 批量入口 `build_all.sh` 对 `ubuntu-x86_64`、`raspberry-pi`
+各构建相同六版本，共十二包，BNC 默认 `VectorCore.tar.gz`。
 
 ## 3. `build.sh`：250 Linux 三目标
 

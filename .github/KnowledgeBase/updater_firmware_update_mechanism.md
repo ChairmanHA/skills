@@ -22,8 +22,10 @@
    handoff 包，再对系统临时目录与旧 `AppLocalDataLocation` 中未被活跃进程锁定的 updater
    工作区清扫一次；该过程不发起网络请求，也不再做延迟或每分钟清扫。
 3. 启动时不创建远端下载任务、不比较远端软件版本、不弹出自动更新提示。
-4. 打开 `UpdateDialog` 或切换到 `Latest Online` 时仍不联网；在线行右侧显示
-   `Download` 按钮。
+4. standard cn/en 打开 `UpdateDialog` 或切换到 `Latest Online` 时仍不联网；在线行
+   右侧显示 `Download` 按钮。neutral cn/en、俄语版、BNC 及启用启动 ETH Connect
+   对话框的特殊版本隐藏 `Latest Online` 和 `Download`，默认选择 `Local Default`
+   （安装目录内置 updater/固件）；`Local File` 仍可手动选择以导入离线归档。
 5. 只有用户点击 `Download`，对话框才调用 `PacketSpec::loadUrl()`，依次进入下载、解压和
    包解析。
 6. 下载时在 release notes 下方显示进度行，release notes 自动让出高度；解压和解析阶段显示
@@ -152,7 +154,10 @@
 1. `UpdateDialog` 构造、显示和来源切换都不调用 `loadUrl()`。
 2. 当插件打开对话框时，如果启动阶段接管了 `m_handoffRemoteSpec`，就把它注入
    `UpdateDialog::setRemotePacketSpec()`；注入只访问本地缓存。
-3. `switchOnline()` 只切换到 `Latest Online` 并刷新已有信息。
+3. `switchOnline()` 在普通 standard cn/en 中只切换到 `Latest Online` 并刷新已有
+   信息；离线版本则切到 `Local Default`。Updater CMake 统一通过私有
+   `SGS_UPDATER_OFFLINE_ONLY` 定义该版本策略，构造、共享菜单入口和下载按钮刷新
+   都使用同一规则，隐藏的在线按钮不会因刷新再次出现。
 4. 只有用户点击右侧 `Download` 时才开始远端加载；失败后 worker 完全结束即可重试。
 5. 下载成功后，进度区短暂显示完成状态再隐藏，目标版本和 release notes 立即显示。
 6. 一旦 `m_remoteFile` 有效，`Update` 按钮直接使用这份 `PacketSpec` 的

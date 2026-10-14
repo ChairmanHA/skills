@@ -133,6 +133,32 @@ platform plugin 选择 `wayland` 或 `xcb`，因此不需要启动脚本注入
 `QT_QPA_PLATFORM`、`QT_PLUGIN_PATH` 或 `LD_LIBRARY_PATH`。归档根 launcher 仅保留为
 Raspberry Pi 兼容入口，不是共用产物的启动条件，也不应在 RK3588 上使用。
 
+### 2.5 本机 VMware 来宾与批量入口（api2.0.36 / dev）
+
+2026-10-14 已确认本机 Ubuntu 18.04.6 x86_64 来宾具备与上述 profile 相同路径的
+Qt 5.15.18（x86_64、AArch64 target、x86_64 hosttools）、GCC 7.5 本机与交叉
+编译器，以及 `/opt/openssl`、`/opt/aarch64-openssl`。工程位于
+`/home/harogic/Desktop/sgstudio`。SSH 优先用 VMware Tools 动态报告的 NAT 地址，
+不要把 `192.168.1.22` 桥接地址作为可靠入口。
+
+`api2.0.36` 和 `dev` 的批量编排入口：
+
+```bash
+cd ~/Desktop/sgstudio
+bash scripts/build_all.sh --dry-run --watermark off
+JOBS=4 bash scripts/build_all.sh --watermark off
+```
+
+该脚本复用现有 `build.sh`，依次执行 `ubuntu-x86_64`、`raspberry-pi`，
+每个目标包含 `standard cn/en/ru`、`neutral cn/en` 和 `BNC en`，共十二包。
+BNC 默认归档名为 `VectorCore`；全局 archive_name 可覆盖各版本默认名称。
+`--list` 列出矩阵，`--dry-run` 仅打印命令，实际执行时任一目标失败即退出。
+2026-10-14 在 `api2.0.36` 上，两种 `standard cn` 均以 `JOBS=4` 编译与打包成功
+（退出码 0），产物
+分别确认是 x86-64 与 AArch64，未修改工具链或安装新依赖。日志与归档校验值记录在
+`D:\development\skills\.github\TaskLog\2026-10-14_vm-linux-build-all.md`；
+目标树莓派的真实运行验收仍需单独进行。
+
 ## 3. 108：只使用 `build_pi.sh`
 
 108 是原 192.168.3.132 运行机，当前地址为（有可能变化，以实际地址为准）：

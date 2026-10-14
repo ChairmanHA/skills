@@ -6,7 +6,7 @@
 - FancyTabWidget 当前哪些信号代表“用户主动开关业务”。
 - 为什么不能把“用户主动关业务 -> 关 Mod”挂在 `currentSelectedBusinessChanged(nullptr)` 上。
 
-本文描述的是当前代码现状，不讨论已废弃方案。
+本文描述当前代码现状。2026-10-13 增加 Instrument 外部 MOD 直接使能 Home Waveform 的入口；面板内部 Auto Mod 策略和桌面 main 行为保留。
 
 ## 1. 先说结论
 
@@ -32,7 +32,7 @@
 
 - `FancyTabWidget`：负责从 UI 选择链里区分“用户主动动作”和“程序化状态同步”；
 - `MainWindow`：在收到用户主动动作后，根据偏好和 business scope 同步公共 `Mod` property；
-- `MainWindow::updateSweepAndBusinessAvailability()`：负责根据当前是否存在已启用的 baseband business，统一裁决 `MOD` 按钮是否可用；
+- `MainWindow::updateSweepAndBusinessAvailability()`：统一裁决 MOD availability；main 看已启用基带，Instrument 看 Home 展示的 Waveform 与其原使能前提；
 - 后续业务裁决仍然走原有 `selectBusiness2Work() -> updateOrchestrator()` 链。
 
 这意味着 Auto Mod 不直接参与：
@@ -79,7 +79,7 @@ Panel::enabledChanged(bool)
 
 ### 3.2 `MainWindow` 不直接改 runtime，只同步公共 `Mod` property
 
-`MainWindow` 当前只在收到：
+面板内部的 Auto Mod 路径只在收到：
 
 - `businessEnabledByUser(IBusiness *)`
 - `businessDisabledByUser(IBusiness *)`
@@ -146,14 +146,12 @@ Panel::enabledChanged(bool)
 
 - 根据当前选中的 business/provider 能力，统一刷新 CommonPanel 上依赖业务上下文的按钮可用性。
 
-当前用途：
+当前用途按 UI 模式区分：
 
-- `selectedBiz->providerKind() == None` 或当前不存在 selected business 时：
-   - 强制公共 `Mod` property 为 `false`；
-   - 禁用 `CommonPanel` 的 `MOD` 按钮，并让其显示 `OFF`。
-- 当前存在 `providerKind() != None` 的 selected business 时：
-   - 恢复 `MOD` 按钮可操作；
-   - 是否自动打开 `Mod` 仍然只由 Auto Mod 偏好决定。
+- 无已启用 provider 时，两种模式都让公共 Mod 保持 OFF。
+- main 仍要求已启用 provider 才能操作 MOD，保持原流程。
+- Instrument 的 MOD OFF 时以用户当前选择的 Waveform 为目标，普通基带无需先使能 Panel；三个文件类型则要求原使能控件可用。MOD ON 时以已启用 Waveform 为目标，仍允许关闭。
+- 面板主动使能的自动联动继续受 Auto Mod 偏好控制。Instrument 外部 MOD 是明确的用户命令，不依赖该偏好。
 
 这条规则是 **UI availability / 状态收敛**，不是 Auto Mod 偏好本身。
 
@@ -194,7 +192,7 @@ Panel::enabledChanged(bool)
 1. `TabWidget::setSelected()` 只把 `sender() == panel` 视为 `userInitiated=true`。
 2. `FancyTabWidget::onBusinessSelectedStateChanged()` 在切换新业务时，对旧业务 `prev->setSelected(false)` 使用 `QSignalBlocker`，避免把旧业务关闭再向上广播成新的用户动作语义。
 
-因此当前稳定约束是：
+因此面板内部 Auto Mod 的稳定约束是：
 
 - **Auto Mod Off 只能接 `businessDisabledByUser`，不能接 `currentSelectedBusinessChanged(nullptr)`。**
 
@@ -207,7 +205,7 @@ Panel::enabledChanged(bool)
 - 在 `businessEnabledByUser` / `businessDisabledByUser` 上扩展“用户动作增强策略”。
 - 继续把 Auto Mod 偏好保留在 `MainWindow + globalSettings` 这一层。
 - 继续让 `currentSelectedBusinessChanged(...)` 只负责 orchestrator 输入更新和上下文连接维护。
-- 在 `updateSweepAndBusinessAvailability()` 上补充“当前没有已启用 baseband business 时，`MOD` 必须 OFF + disabled”这类 availability 收口规则。
+- 将模式对应的可用性规则统一放在 `updateSweepAndBusinessAvailability()`：main 继续要求已启用 provider；Instrument 按 Home 目标与原使能前提判断。无已启用 provider 时 MOD 状态仍为 OFF。
 
 ### 6.2 不要做的事
 
@@ -224,7 +222,7 @@ Panel::enabledChanged(bool)
 2. 用户主动关闭当前业务时，是否只通过 `businessDisabledByUser` 触发关 `Mod`。
 3. 切换到新业务时，旧业务关闭是否仍然不会误触发 Auto Mod Off。
 4. 配置恢复、preset/reset、程序化 `setBusinessSelected()` 是否仍然不会被重新解释成用户动作。
-5. “无已启用调制业务时 `MOD` 按钮不可用”是否仍然只通过 `updateSweepAndBusinessAvailability()` 收口，而不是分散到 restore/user path 的零散补丁。
+5. MOD availability 是否仍在 `updateSweepAndBusinessAvailability()` 收口，并区分 main / Instrument 的选定规则。
 6. `MainWindow::selectBusiness2Work()` / `TxSessionService::requestRefresh()` 是否仍然保持为唯一裁决入口，而不是在 Auto Mod 逻辑里直接下发 runtime。
 
 ## 8. 结论
@@ -238,3 +236,21 @@ Panel::enabledChanged(bool)
 - `businessEnabledByUser` / `businessDisabledByUser` 表达用户意图；
 - `currentSelectedBusinessChanged` 表达选择态变化；
 - 二者不能混用。
+
+## 9. Instrument 外部 MOD 请求与 Home 概要
+
+Instrument CommonPanel 的 MOD 点击不先翻转 checked 或写公共 Mod，而是发出 instrumentModulationRequested。MainWindow 以 InstrumentHomeWidget::waveformBusiness() 为唯一目标来源，通过原 Panel::triggerBtnEnabledChecked() 执行用户使能入口，保留互斥选择、文件约束及确认。
+
+Panel::isBtnEnabledAvailable() 表达原使能控件是否接受 ON。Playback、QuickWaveform、Streaming 直接读取已有控件可用性，文件加载/清空后发 enabledAvailabilityChanged；MainWindow 不按业务名称或文件字段复制规则。
+
+外部请求由一条 MainWindow context 的 enabledChanged 完成连接等待实际回写。Streaming 取消时发布恢复状态；Digital 当前大波形告知提示关闭后沿用原提交流程。完成连接在接受/取消、替换请求或对象销毁时结束，成功后才按实际 selectedBusiness 设置 Mod。外部显式命令不改变 Auto Mod 偏好，也不把页面切换解释为用户使能。
+
+| 当前状态 | Home 概要 / 点击进入 / 外部 MOD 的目标 | 概要状态 |
+| --- | --- | --- |
+| MOD ON，已启用 A，正在编辑 B | A | ON |
+| MOD OFF，当前选择 B | B | OFF，即使另一 Panel 仍有选择状态 |
+| B 未加载所需文件或取消确认 | B 保持未使能 | OFF |
+
+概要继续读取目标 Panel 的原 LabelButton/EnumTextButton 格式化参数，新增 LabelButton::labelTextChanged 的通用值通知，不依赖隐藏 Panel 的布局刷新；参数、状态、目标切换与回 Home 时同步。状态表达配置使能，不表示 RF 已开启或执行已完成。
+
+本轮仅静态检查，未编译/运行；实施和待验收场景见 [TaskLog](../TaskLog/2026-10-13_fix-instrument-mod-waveform-link.md)。
