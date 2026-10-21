@@ -239,7 +239,9 @@ Panel::enabledChanged(bool)
 
 ## 9. Instrument 外部 MOD 请求与 Home 概要
 
-Instrument CommonPanel 的 MOD 点击不先翻转 checked 或写公共 Mod，而是发出 instrumentModulationRequested。MainWindow 以 InstrumentHomeWidget::waveformBusiness() 为唯一目标来源，通过原 Panel::triggerBtnEnabledChecked() 执行用户使能入口，保留互斥选择、文件约束及确认。
+Instrument CommonPanel 的 MOD 点击不先翻转 checked 或写公共 Mod，而是发出 instrumentModulationRequested。Home 概要、外部 MOD 与可用性统一读取 FancyTabWidget::currentBusiness()，通过原 Panel::triggerBtnEnabledChecked() 执行用户使能入口，保留互斥选择、文件约束及确认。
+
+2026-10-14：MainWindow::setInstrumentHomePage() 是启动配置恢复和真正 Back 完成后的共用进入边界。MOD ON 且存在已使能业务时，先用 setCurrentWidgetByBusiness() 将浏览页和列表当前项对齐到该业务，再显示 Home；MOD OFF 保留当前浏览对象。输入/确认限制、关闭一层功能弹窗及 System 分类返回都在此边界之前处理。导航本身不改变业务使能。删除旧 waveformBusiness() 的 ON/OFF 双目标解析和 Home 点击进入工作页时的重复定位，不增加记忆上次目标的字段。普通 main 保留原语义。
 
 Panel::isBtnEnabledAvailable() 表达原使能控件是否接受 ON。Playback、QuickWaveform、Streaming 直接读取已有控件可用性，文件加载/清空后发 enabledAvailabilityChanged；MainWindow 不按业务名称或文件字段复制规则。
 
@@ -247,10 +249,11 @@ Panel::isBtnEnabledAvailable() 表达原使能控件是否接受 ON。Playback�
 
 | 当前状态 | Home 概要 / 点击进入 / 外部 MOD 的目标 | 概要状态 |
 | --- | --- | --- |
-| MOD ON，已启用 A，正在编辑 B | A | ON |
+| MOD ON，已启用 A，正在编辑 B，返回 Home | 当前选择恢复为 A；三个入口均取当前 A | ON |
+| 随后在 Home 关闭 MOD | 当前 A；参数和类型保持一致 | OFF |
 | MOD OFF，当前选择 B | B | OFF，即使另一 Panel 仍有选择状态 |
 | B 未加载所需文件或取消确认 | B 保持未使能 | OFF |
 
-概要继续读取目标 Panel 的原 LabelButton/EnumTextButton 格式化参数，新增 LabelButton::labelTextChanged 的通用值通知，不依赖隐藏 Panel 的布局刷新；参数、状态、目标切换与回 Home 时同步。状态表达配置使能，不表示 RF 已开启或执行已完成。
+概要通过当前 Panel 的 summaryParameters() 读取按关联属性分行的原 LabelButton/EnumTextButton 格式化参数，以及多音生效音数、Playback Auto Scale；布局空位保持为空。沿用 LabelButton::labelTextChanged 和 Panel::summaryChanged 通知，不依赖隐藏 Panel 的布局刷新；浏览业务变化才重新绑定 Panel，Mod 和已使能业务变化只刷新状态。参数、状态、目标切换与回 Home 时同步。状态表达配置使能，不表示 RF 已开启或执行已完成。
 
-本轮仅静态检查，未编译/运行；实施和待验收场景见 [TaskLog](../TaskLog/2026-10-13_fix-instrument-mod-waveform-link.md)。
+本轮仅静态检查，未编译/运行；统一当前选择的实施及静态场景见 [TaskLog](../TaskLog/2026-10-14_unify-instrument-home-waveform-selection.md)，原使能入口接入见 [此前 TaskLog](../TaskLog/2026-10-13_fix-instrument-mod-waveform-link.md)。

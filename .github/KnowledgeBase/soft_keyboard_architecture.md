@@ -87,6 +87,7 @@
 实现文件：
 
 - `src/libs/business/frequencyunitadapter.cpp`
+- `src/libs/business/samplerateunitadapter.cpp`
 - `src/libs/business/timeunitadapter.cpp`
 - `src/libs/business/powerunitadapter.cpp`
 - `src/libs/business/powerstepunitadapter.cpp`
@@ -99,6 +100,14 @@
 - 支持 `GHz/MHz/kHz/Hz`。
 - 允许 `g/m/k/h` 作为实体键盘缩写。
 - 在无显式单位要求时，会根据数值大小选择更合适的显示单位。
+
+#### 采样率适配器
+
+- `SampleRateUnitAdapter`的工厂类型是`SampleRate`，base value为Sa/s（samples per second，每秒样点数），单位族为GSa/s/MSa/s/kSa/s/Sa/s，快捷缩写为g/m/k/s。
+- 采样率与频率是不同物理量；前者表示样点更新次数，后者表示周期次数。C0周期波形有SRate=f*N，Arb整段重复率为SRate/L，不能把采样率直接当波形频率。
+- 复用FrequencyUnitAdapter的固定SI倍率实现，后者的protected单位后缀构造给出Sa/s族，原public构造保持Hz。新子类不复制事件、提交或步进；BaseUnitAdapter的单位尾缀识别允许斜杠，并继续交给各adapter白名单验证。
+- `availableUnits()`直接生成既有四个单位快捷键；裸Enter沿用当前单位上下文，直接convertToBase无单位字符串按Sa/s解析。getCurrentUnit/数字选区/API回写及可选Step也复用现有流程。Hz/ms等其他物理量不作为SampleRate输入别名接受。
+- AWG的SRate面板和软键盘均使用SampleRate/9位精度，不再将Frequency显示结果做后缀替换。周期波形的SRate仍由f*N推导并只读，Arb/Noise/DC可编辑；当前只做静态核对。见[SRate软键盘实施TaskLog](../TaskLog/2026-10-19_awg-srate-keyboard.md)。
 
 #### 时间适配器
 
@@ -165,9 +174,11 @@
 
 这使得主输入区和步长编辑区都能复用同一套 adapter 协议。
 
-Instrument 展示只改变这一层的视觉组织：`TouchNumKeyboard` 从创建时的 trigger/anchor 祖先继承最近的 `uiMode` 动态属性；当值为 `instrument` 时，标题和主输入框使用 24px；只有实际挂有 `EditableWidget`/`stepEdit` 时，Step 名称和步长数字才使用 24px，并把现有 box layout 切换为从左到右，使两者处于同一行。无 StepWidget 的键盘只放大标题和主输入框，标题标签保持紧凑高度。Main 模式继续使用原来的字号和上下布局。这个分支不替换 `stepEdit`，也不改变 focusProxy、receiver、快捷单位或提交链。
+Instrument 展示只改变这一层的视觉组织：`TouchNumKeyboard` 从创建时的 trigger/anchor 祖先继承最近的 `uiMode` 动态属性。自 2026-10-15 起，Instrument 数值键盘为 440×600 px，标题文字行替换为 20 px 窄拖动条；原 titleGridLayout 改为第一行输入区。主值使用原 QLineEdit，保留 24 px 字号、输入高度和编辑行为；有实际挂载的 `EditableWidget` 时，原 Step 控件放在主值右侧，约按 2:1 分配宽度，步长数字 24 px、Step 标签 18 px。没有 Step 时主输入跨满整行，不保留空白标题或 Step 区。Home Center/Level 为典型场景，是否同行只取决于已有 Step 控件，不按参数名称添加业务分支。
 
-样式边界补充（2026-09-14 真机反馈修正）：顶层 `Qt::Tool` 键盘仍以 anchor 为 parent，QSS 后代匹配不会在窗口边界停止。调制/Sweep 页的 `Core--Panel QPushButton` 曾误把键帽设为固定 64px/24px；CommonPanel 不继承 Core::Panel，所以外观不同。五行键帽缩短后，固定 570px 键盘中的多余空间进入标题和布局间隙，不能归因于是否存在 StepWidget。现用 `Controls--TouchNumKeyboard#TouchNumKeyboard[uiMode="instrument"] > .QPushButton` 明确覆盖：75px 内容最小高度、解除 64px 最大高度限制、22px 键帽字号（与 instrument CommonPanel 参考效果一致），其余颜色/边框/按下态继续来自主题。原 44px 标题高度补丁已移除。主输入框选择器必须包含 `#edit` 才能覆盖带 `#mainContent` 的通用 22px 字体规则。上述规则在 keyboard reparent 到 overlay 后仍以自身 `uiMode` 为准。
+原 nameLabel 复用为 20 px 空白拖动锚点，不绘制横线或文字；参数名称保留为窗口 title 和拖动区 tooltip。Instrument 的 setWindowTitleAlignment 不再重排这一行。titleWidget() 查询排除主输入框，Step 替换/移除时不误删主输入，移除后恢复整行主值。Main 模式继续使用默认 377×570 px、原标题及上下布局。此重排不替换主值或 stepEdit，不改变 QObject parent、focusProxy、receiver、快捷单位或提交链；焦点输入框使用 Instrument 局部蓝色边框提示。
+
+样式边界补充：顶层 `Qt::Tool` 键盘仍以 anchor 为 parent，QSS 后代匹配不会在窗口边界停止。2026-09-14 曾发现调制/Sweep 页的 `Core--Panel QPushButton` 将键帽固定为较小高度，因此键盘继续使用带 ID 和 uiMode 的专属选择器覆盖业务 Panel 的固定高度限制。2026-10-15 当前覆盖为 90 px 键帽内容最小高度、解除业务 Panel 的最大高度限制、26 px 键帽字号与 30 px 图标，四列和五行主键区均匀分配可用空间；其余颜色/边框/按下态来自原深浅主题。主输入框选择器仍包含 `#edit`，避免被通用 22 px 字体规则覆盖。覆盖位于 Core 的 instrumentThemeOverride，只匹配 keyboard 自身的 instrument 属性；默认主题文件、文本键盘和 Main 布局未改。当前尺寸预算仅静态核对，实际绘制、触摸和深浅主题尚待运行验收。
 
 ## 3. 组装层：`createKeyboardBase()` 如何把它们接起来
 
@@ -476,12 +487,18 @@ managed overlay。X11 目标机可能有 Composite 扩展但没有 compositor，
 弹窗中的输入控件移动。位置由键盘自身计算：`x = hostWidth - keyboardWidth`，
 `y = (hostHeight - keyboardHeight) / 2`，再沿用既有 overlay / 屏幕边界钳位。
 
+2026-10-15 的 440×600 px 键盘在标准 1024×600 宿主中的初始位置为 `(584, 0)`。
+Wayland 的宿主容纳判断对 Instrument 使用 0 px 额外边距，允许完整高度贴边；Main
+与 helper 仍要求原 8 px 边距。否则 600 px 高键盘会因要求 616 px 高的宿主而误走
+独立 screen host 路径。此处不改变呈现模式、所有权或 overlay 的实现。
+
 - Instrument 的必需宿主是 `GUIContext::getMainWindow()`；MainWindow 构造时即注册。
   功能弹窗不另作几何宿主，避免数字键盘被弹窗的较小区域裁切或改变初始位置。
 - Wayland 沿用 managed overlay，位置从主窗口映射到 overlay 本地坐标；Windows/X11
   沿用顶层 `Qt::Tool`，使用对应全局坐标。两条路径都在键盘显示前设置最终位置。
-- overlay 宿主几何变化时重新对齐右侧。标题拖动仍沿用现有行为，重新打开则恢复固定
-  初始位置；没有新增状态、资源、输入路径或提交协议。
+- overlay 宿主几何变化时重新对齐右侧。20 px 拖动条沿用原鼠标/触摸移动和边界钳位，
+  在 600 px 高宿主中纵向位置固定为 0，主要用于左右避让；重新打开恢复靠右初始位置。
+  没有新增状态、资源、输入路径或提交协议。
 - 普通 Main 和 helper-local 保留既有 preferred host / anchor 定位策略。此处只调整
   数字键盘；普通文本键盘仍遵循第 10 节的贴底规则。
 

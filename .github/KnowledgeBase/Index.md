@@ -10,7 +10,7 @@
 | TX、RF/MOD、runtime、provider、插件加载、退出死锁 | [A-runtime](#a-runtime) |
 | 设备发现、切换、USB/ETH、UID、多实例、时钟、Trigger、许可证 | [B-device](#b-device) |
 | Playback、ARB、WAV/IQS、采样率、带宽、容量、大波形 | [C-playback](#c-playback) |
-| LF AWG/TrueArb、Arb 波形编辑、EasyWave、AM/FM/Ramp、Multitone、RMS、Digital/16QAM、频谱仪验证 | [D-waveform](#d-waveform) |
+| LF AWG/TrueArb、Arb 波形编辑、AI 附件/波形预览、EasyWave、AM/FM/Ramp、Multitone、RMS、Digital/16QAM、频谱仪验证 | [D-waveform](#d-waveform) |
 | SCPI、程序级远程控制、命令接入、ListMode 命令兼容 | [E-scpi](#e-scpi) |
 | Sweep/FScan、扫描业务、CW 模式切换、预校验 | [F-sweep](#f-sweep) |
 | Minibar、helper、typed IPC、LayerShellQt、浮窗 | [G-minibar](#g-minibar) |
@@ -49,23 +49,24 @@ Get-Content -Encoding UTF8 -LiteralPath "$kb\listmode_scpi调试指南.md" | Sel
 ## B-device
 
 - [入口：设备发现](device_discovery_architecture.md)：枚举与职责边界。
-- [设备切换与 UI 配置链](device_open_ui_config_flow.md)：open → UI → orchestrator / runtime。
+- [设备切换与 UI 配置链](device_open_ui_config_flow.md)：open → UI → orchestrator / runtime；MScan Last State 恢复与能力就绪门控。
 - [多设备生命周期](htra_multi_device_stageA_design_and_debug.md)：current / retain-open / fallback / watchdog / A-B 机箱。
 - [多实例 USB 占用](multi_instance_usb_ownership_and_startup_gate.md)：InstanceStateRegistry / startup gate / UID 恢复。
 - [手工 ETH 连接](manual_eth_connect_temporary_design.md)：临时设计、启动策略、IP:Port、模态连接。
 - [USB / ETH 断联恢复分析](eth设备和usb设备断联恢复的异同点分析.md)：失联判定、注销、coordinator 差异。
 - [H2 API v2.0 参考](htra_h2_api_v2_0_usage.md)：设备能力与 API 调用顺序。
-- [设备设置与 Trigger 拆分](device_settings_panel_and_trigger_split_design.md)：Reference Clock / Trigger In-Out / RF Hardware。
+- [设备设置与 Trigger 拆分](device_settings_panel_and_trigger_split_design.md)：Reference Clock / Trigger In-Out / RF Hardware；Routing 下输出 Hop/Sweep 只读并保留选择。
 - [参考时钟接入](htra_reference_clock_integration.md)：Profile / FeatureSpec、External 失锁切回 Internal 与实际状态回写。
+- [H2 实时 warning 轮询重构](htra_runtime_warning_polling_design.md)：活动告警集合、时钟周期检测、失锁延迟单次切Internal/普通查询自然清警及原UnLevel边界；静态实施，构建/设备验收待完成，不新增周期scan/FFM查询。
 - [Capability ID 分档方案](common_capability_id_and_hw_version_strategy.md)：model / hardware_version / 公共语义 ID。
 - [RF Port 能力与绑定](rfport_open_query_and_ui_binding.md)：open 查询、EnumTextButton / property。
 - [型号显示名](device_model_display_name_rules.md)：device_info.xml 条件别名。
 - [Analog 许可证](analog_device_license_gating.md)：FixedLic、USB/ETH 时序、UI 门控与隐藏页面启动恢复。
-- [PGA 平台状态](pga_runtime_realtime_status_chain.md)：CPU 温度、电池、状态栏链路。
+- [PGA 平台状态](pga_runtime_realtime_status_chain.md)：CPU 温度、电池轮询、HLC 字段存在性与电池栏显示条件。
 - [GPIO 位掩码分析](GPIO_interface.md)：setbits / resetbits 语义推断，需核实 API 契约。
 
 ## C-playback
-- [信号损伤 P0 算法接入与交互](signal_impairments_p0_interaction_design.md)：五项 P0 算法与难度、离线 Baseband 开放依据、可写 IQ 到不可变 payload 的接入、SNR/功率与 Apply；[原始需求](信号损伤功能需求文档.md)，尚未实施。
+- [信号损伤方案：FPGA 噪声源与扫描同步补偿](signal_impairments_p0_interaction_design.md)：需求场景与常用参数、载波/噪声两种参考、为何扫描固定噪底需 FPGA 同步补偿、API/FPGA/前端 IQ 功能划分与顺序、简单版（全点同参，逐点差异走 SCPI）所需 API 草案,设计提案未实施。
 - [Center/Level 配置链路重构设计](CenterLevel配置链路重构设计.md)：固定 Playback 的 FFM-only 当前实现；CW、Mute 与 LScan/FScan 的后续优化方向。
 - [入口：波形参数约束](Waveform_Parameters_Constraints.md)：默认值、采样率、IQ 带宽、UI 联动；含 AWGN 单遍/分块 FIR 优化、实测耗时及频谱/RMS验收。
 - [多型号 Playback 能力迁移](htra_multi_model_playback_capability_refactor.md)：能力域、revision、immutable payload、分阶段进度。
@@ -79,11 +80,10 @@ Get-Content -Encoding UTF8 -LiteralPath "$kb\listmode_scpi调试指南.md" | Sel
 - [IQS-WAV 格式参考](IQS-WAV文件格式说明.md)：录制文件、trig / prof MsgPack，区别于 Save IQ。
 
 ## D-waveform
-- [Arb 最小编辑模型与用户交互](arb_editor_minimum_model_and_user_interaction.md)：产品交互方案；竞品分层、A/B/D/E/F 场景；三类片段、图表联动、选区替换与五类操作流程，不展开实现细节。
-- [Arb 编辑需求与最小分段表设计](arb_editor_requirements_and_segment_table_design.md)：竞品手册分层；A/B/C/D/E 单通道编辑场景；Hold/Ramp/Data 最小模型、覆盖原理与五类案例、拆分与等时长替换；选区、替换、插入与幅值调整的即时反馈 UI 配图；与固定点数点表方案的区别，尚未实施。
-- [入口：TrueArb 独立波形编辑器设计](awg_truearb_arb_editor_design.md)：SGStudio 启动与文件交接；固定点数、Sine/Square 模板；双游标、表格连续行选择或起止索引确定填充范围，电压点表同步及撤销；附 EasyWave 研究与 C0 边界。
-- [TrueArb 硬件契约与七类波形算法](awg_truearb_waveform_algorithms_and_arb_editing.md)：C0 逐点播放所需设备能力、相对 B0 的软件交付变化、文件导入语义与厂商调研。
-- [Digital 交互入口](digital_modulation_user_interaction_flow.md)：SPS、异步生成、截断、reset、保存。
+- [AWG CSV 通用契约 1.0 与实现边界](arb_ai_exchange_template_and_preview_design.md)：链接唯一通用 Markdown；Save CSV 仅非 Arb 模式提供，Arb 移除 Save 占位并上移参数；17 项元数据、不保存选区，范围由用户消息描述。AI 交换固定 50 Ω/Linear，程序历史导入兼容性见正文；摘要只读；预览含 overview/局部查看范围、双击创建/拖动样点游标及标准时间按钮，Start 编辑固定右端并联动 Span、满量程可编辑；连续缩略图与分层极值缓存。format_version=1，等待测试，未接入打包分发。
+- [Arb 编辑需求与最小分段表设计](arb_editor_requirements_and_segment_table_design.md)：模板/快速库入口与 A/B/C/D/E 单路任务、Hold/Ramp/Data、按任务划分重采样边界及线性边沿语义；[交互简版](arb_editor_minimum_model_and_user_interaction.md)：保留原 A/B/D/E/F 编号的五类操作说明；均为尚未实施方案。
+- [TrueArb 硬件契约与七类波形算法](awg_truearb_waveform_algorithms_and_arb_editing.md)：C0 设备契约与算法；Amplitude、DC Offset、HighZ/50 Ω/Custom 负载含义及 CSV 导出恢复、预期播放电压；含 Pulse 参数联动与 DC 参数收敛（已实现、静态核对）、Noise 参数与算法调研（维持现状）、B0 对比与厂商调研。
+- [Digital 交互入口](digital_modulation_user_interaction_flow.md)：SPS、异步生成、截断、Instrument 截断选项触控尺寸与 SVG 留白、reset、保存。
 - [Multitone 算法入口](htra_multitone_current_algorithm_and_vsg60_boundaries.md)：tone / notch / phase / AutoScale / preview；Fixed 与 LScan 的偶数音 center 补偿。
 - [Multitone 与 VSG60 对比](multitone_vsg60_three_case_comparison_and_playback_consistency.md)：三组样本与 Playback 一致性。
 - [iqtone.m 借鉴候选](htra_multitone_iqtone_reuse_candidates.md)：历史参考、后续优化建议。
@@ -101,7 +101,7 @@ Get-Content -Encoding UTF8 -LiteralPath "$kb\listmode_scpi调试指南.md" | Sel
 ## E-scpi
 
 - [入口：SCPI 接入审阅与方案](scpi_review_and_integration_plan.md)：TX/UI 回写、错误语义、ScpiIntentService 迁移。
-- [ListMode 命令调试入口](listmode_scpi调试指南.md)：TCP 5025、命令表、查询响应、SCPI 临时 MScan 限制与历史 R&S 实测流程。
+- [ListMode 命令调试入口](listmode_scpi调试指南.md)：TCP 5025、命令表、查询响应、SCPI 选择/使能 MScan 的预检与历史 R&S 实测流程。
 - [ListMode 接口设计](listmode接口实现.md)：MScan Draft/Submitted/Applied、数据 Apply 与设备执行分离、真实执行与兼容映射边界。
 - [R&S List Mode 参考](rs_list_mode_scpi_reference.md)：R&S 的 listmode scpi命令、触发、索引、学习与文件容器。
 
@@ -120,12 +120,12 @@ Get-Content -Encoding UTF8 -LiteralPath "$kb\listmode_scpi调试指南.md" | Sel
 
 ## H-ui
 
-- [Instrument 模式设计原则与交互总览](instrument_ui_mode_design_principles_and_interaction.md)：SMA100B 借鉴、Home 摘要表、Waveform 四列三行与 13 类字段表、五幅 Mermaid 页面图与操作说明、System 六类与 Back、Waveform/MOD 同目标、MScan 数据 Apply；当前实现/验收边界。
+- [Instrument 模式设计原则与交互总览](instrument_ui_mode_design_principles_and_interaction.md)：SMA100B 借鉴、Home 摘要表、Waveform 四列三行/2 px 间隙与 13 类关联分组字段表、多音生效音数/两行布局及保存补位、Playback Auto Scale、Streaming 单一滚动、页面图与操作说明、System 六类与 Back、回 Home 统一 Waveform/MOD 当前目标、MScan 数据 Apply；当前实现/验收边界。
 - [QSS 入口](QSS_Best_Practices.md)：样式编写与工程约定。
 - [LabelButton 状态样式](labelbutton_style_state_workflow.md)：InfoButton、刷新链、RF / Settings / Sweep。
 - [双行按钮空间限制](labelbutton_dual_row_vertical_space_limit.md)：padding / labelMargins；[5 寸字号与物理换算](<5 寸 1024×600 的物理换算（“模拟”基线）.md>)：instrument 24px / 64px 参数按钮与真机验收边界。
 - [Level UNLEVEL badge](commonpanel_level_unlevel_badge_ui.md)：CommonPanel 局部标记。
-- [Auto Mod 用户意图](auto_mod_user_intent_boundary.md)：FancyTabWidget 用户信号、main / Instrument MOD availability、外部使能请求与 Home 概要目标。
+- [Auto Mod 用户意图](auto_mod_user_intent_boundary.md)：FancyTabWidget 用户信号、main / Instrument MOD availability、外部使能请求、返回 Home 对齐与统一当前目标。
 - [调制列表响应式布局](fancytabwidget_modulation_list_responsive_layout.md)：单/双列、宽度与滚动条。
 - [TitleBar 菜单与溢出](titlebar_menubar_outputmode_and_overflow_behavior.md)：central grid 接入、输出模式、工具组、重复触摸。
 - [Instrument 窗口平台行为](instrument_ui_mode_platform_window_behavior.md)：树莓派主屏 1024×600 自动启动、显式 ui-mode 优先、QWindowKit 归属与全屏合同；[SMA100B 风格 Home / 配置导航](instrument_home_sma100b_layout_and_navigation.md)：Home Sweep 只读 ON/OFF、MScan 无数据/未 Apply/文件路径摘要、右侧 Back 与 System 分类页面；仅静态核对，未真机验收；[旧 Home / Main 历史](<5寸屏幕的Home Main 交互设计.md>)：设置 Home、全宽 Main、悬浮导航与类型弹窗。
@@ -143,7 +143,7 @@ Get-Content -Encoding UTF8 -LiteralPath "$kb\listmode_scpi调试指南.md" | Sel
 
 ## I-input-pitfalls
 
-- [入口：软键盘体系](soft_keyboard_architecture.md)：数值键盘与单位同步、helper-local、Instrument 数字键盘固定右侧及 5 寸文本键盘回显焦点与主题边界。
+- [入口：软键盘体系](soft_keyboard_architecture.md)：数值键盘与单位同步、Sa/s采样率adapter、helper-local、Instrument 数值键盘 600 px 全高/主值与 Step 同行/窄拖动条，以及 5 寸文本键盘回显焦点与主题边界。
 - [数值步长策略](numeric_step_strategy_guidelines.md)：可编辑 / 125 / 固定步长选择。
 - [树莓派系统键盘](wayland_raspberry_pi_system_keyboard_integration.md)：QLineEdit / QInputMethod / OSK0 / DBus。
 - [重复软键盘](Pitfalls/Property_Binding_Duplicate_SoftKeyboard.md)：隐藏 panel、多控件绑定、beginEditing 来源。

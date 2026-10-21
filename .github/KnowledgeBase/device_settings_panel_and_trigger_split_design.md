@@ -74,11 +74,13 @@ Instrument 复用同一份 property 绑定和设备快捷接口，内容分为�
 语义：
 
 - 这一组定义“设备在运行过程中，如何对外输出时序标记”。
-- `Source` 可选择当前 TX Channel，或选择原始 `Trigger Event`。
-- `Trigger Event` 表示输入触发事件发生后立即输出信号，不再按通道 Hop/Sweep 重计数。
-- `Action` 表示按 Hop 还是按 Sweep 产生输出触发脉冲。
+- `Source` 可选择当前 TX Channel，或选择 `Routing`（触发输入转发，内部仍沿用原 EVENT 语义 ID）。
+- `Routing` 将触发输入转发至输出，不再按通道 Hop/Sweep 重计数。
+- `Action` 仅在 Channel 源下选择按 Hop 还是按 Sweep 产生输出触发脉冲；Routing 下按钮置灰且保留原动作值，切回 Channel 后恢复可编辑。
 - `Edge` 表示输出边沿。
 - `Trigger Output` 表示输出使能开关。
+
+Hop/Sweep 可用性由 `CommonDeviceProfile` 的输出源属性回调统一更新 `TriggerOutAction` 的只读状态，页面复用现有属性绑定。启动时默认为 Channel / 可编辑；配置恢复、设备回写、默认重置通过原有属性同步信号应用该规则，不额外改写动作值。既有 SCPI 输出动作 setter 同样遵循属性只读状态，Routing 下拒绝设置，getter 仍返回保留值。该联动仅完成静态核对，尚未构建或运行验收。
 
 ### 3.4 RF Hardware
 
@@ -231,7 +233,7 @@ TxSessionService 在构建 `TxApplyRequest` 时，会从 `CommonDeviceProfile` �
 - `channel_config_trigger(..., stream0, action)` 只负责把 stream0 与通道 Hop/Sweep 动作绑定。
 - `device_config_trigger_out()` 接收新版设备级 Trigger Out 的 state / source / negative pulse / recounter。
 - Trigger Out Source 为 Channel 时，`source` 使用现有 `primaryTxChannel()->num`，并只接受新版头文件定义的 `CHANNEL0 / CHANNEL1`，不会假定当前主 TX 一定是通道 0。
-- Trigger Out Source 为 Trigger Event 时，`source = TRIGGER_EVENT`，触发事件发生后立即输出，`recounter` 被 API 忽略。
+- Trigger Out Source 为 Routing 时，`source = TRIGGER_IN_ROUTE`，转发触发输入；软件固定 `recounter = 1`，用户保留的 Hop/Sweep 选择不参与该分支。
 - 旧页面的 Rising / Falling 分别映射新版正 / 负脉冲。
 - Channel 源下的产品映射为：Trigger Output 控制 state，Hop 使用 `recounter = 1`，Sweep/Scan 使用 `recounter = 10`。
 - FScan、LScan、MScan、Streaming 和 Playback 专用路径不重复配置 Trigger Out。

@@ -1,370 +1,312 @@
-# 信号损伤 P0 算法接入与交互设计方案
+# 信号损伤方案：FPGA 噪声源与扫描同步补偿
 
-日期：2026-10-10。状态：设计提案，尚未实施。
+日期：2026-10-20。状态：设计方案，尚未实施；API 部分是向 API/FPGA 方提出的需求草案。
 
-本方案按三个层次展开：**第一层说明算法、难度与 Baseband 开放范围；第二层说明如何接入现有 IQ 生成和下发链路；第三层说明 UI 交互。** 本轮聚焦下面五项 P0，AWGN 是主要算法工作，输出补偿与频偏可以先交付。
+本文替代 2026-10-10 版“P0 前端 IQ 层 AWGN”方案（旧版见 skills 仓库 git 历史 `ebfeeb2`）。方向变化：**AWGN 不再以前端 IQ 处理为主线，改由 FPGA 噪声源实现，并由 FPGA 在扫描时同步做数字补偿。** 原则保持不变：能用 API 的一定用 API，只有确实只能在前端做的才处理 IQ。
 
-| 优先顺序 | P0 功能 | 实现重点 |
+全文范围是“简单版”：**所有扫描点使用同一组损伤参数**。每点参数不同（情况 1）和损伤随载波频率变化（情况 2）暂不支持，用 SCPI 逐点控制替代。
+
+## 一、需求场景与常用参数
+
+### 1.1 典型场景
+
+| 场景 | 典型客户 | 用到的功能 | 与扫描组合 |
+| --- | --- | --- | --- |
+| BER/PER/EVM 随 SNR 变化曲线 | 通信模组、IoT、无线芯片 | AWGN（载波参考） | 通常单频点；SCPI 逐点改 SNR |
+| 标准解调性能测试：固定噪声功率，改变信号电平 | 蜂窝、Wi-Fi 等标准化产品 | AWGN（噪声参考） | **LScan 改信号电平，噪声保持不变** |
+| 多信道解调一致性：每个信道同一 SNR | 多信道接收机、跳频设备 | AWGN（载波参考） | FScan/MScan，所有点同一 SNR |
+| 多信道 + 固定噪底 | 同上 | AWGN（噪声参考） | MScan 频率和电平都变，噪声保持不变 |
+| 镜像抑制、I/Q 校准算法验证 | 射频芯片、SDR | I/Q 幅度/相位失衡、I/Q Offset | 通常单频点 |
+| 频偏捕获和容限 | 几乎所有接收机 | Frequency Offset | 单频点为主 |
+| 采样时钟恢复和容限 | 基带、调制解调器 | Sample Rate Error | 单频点 |
+| 相噪容限 | OFDM、高阶 QAM | Phase Noise | 单频点 |
+| 均衡器验证 | OFDM、宽带单载波 | Channel Filter（静态多径） | 单频点 |
+| 线缆和夹具损耗补偿 | 所有测试台 | Level Offset、User Flatness | 所有模式 |
+
+接收机灵敏度测试通常**不加 AWGN**，只降低信号电平，噪底由接收机自身的噪声系数决定，用现有 LScan 就能完成。需要固定噪声的，是第二、四行这类**解调性能测试**。
+
+### 1.2 常用参数范围
+
+下表是行业常见的测试设置经验值，不是本设备的规格。
+
+| 参数 | 常用范围 | 说明 |
 | --- | --- | --- |
-| 1 | Level Offset、User Flatness | 直接复用现有 RF 配置与硬件补偿 API；UI层面提供频率补偿表交互 |
-| 2 | Frequency Offset | 直接复用API中的tx_stream.fc_offset |
-| 3 | AWGN 按 SNR 叠加 | 核心需求；带限噪声定标、幅度余量|
-| 4 | I/Q 幅度失衡、相位失衡 | 每点固定矩阵运算；主要工作是参数约定与IQ处理链接入 |
-| 5 | I/Q Offset | 每点加直流偏置；主要工作是 counts 定义、峰值余量和功率统计 |
+| AWGN SNR | −10 ～ +40 dB | BER 曲线常用 0 ～ 30 dB |
+| 噪声带宽 | 信号占用带宽的 1 ～ 1.5 倍，或接收机信道带宽 | 以载波为中心的复基带总宽度 |
+| 噪声功率（噪声参考） | 按标准规定，例如 LTE 解调测试常用 Noc = −98 dBm/15 kHz | 需要换算到噪声带宽内的总功率 |
+| I/Q 幅度失衡 | ±0.1 ～ ±2 dB | |
+| I/Q 相位失衡 | ±0.5° ～ ±10° | |
+| I/Q Offset（载波泄漏） | −20 ～ −60 dBc | |
+| Frequency Offset | ±几 Hz ～ ±几百 kHz，或 ±1 ～ ±100 ppm | |
+| Sample Rate Error | ±1 ～ ±100 ppm | |
+| Phase Noise | 偏移 1 kHz ～ 1 MHz，−60 ～ −110 dBc/Hz | |
+| 静态多径 | 2 ～ 6 径，时延扩展 100 ns ～ 5 µs | |
 
-  
-针对AWGN：  
-1. 生成原始 IQ,做过失衡后，计算信号平均功率。
-2. 复用当前的AWGN算法，根据用户输入带宽，生成带噪声的 IQ。
-3. 按目标 SNR 调整噪声强度。
-4. 逐点相加，处理幅度余量（对IQ 进行必要的归一化和量化），确保信号在硬件可接受的范围内。
+### 1.3 AWGN 的两种功率参考
 
-底层添加IQ Impairments处理模块链路，以正确的顺序依次处理IQ：
+| 参考方式 | 固定的量 | 扫描时的效果 | 对应场景 |
+| --- | --- | --- | --- |
+| **载波参考** | SNR | 噪声随信号电平一起变化，每个点的 SNR 相同 | BER 曲线、多信道同 SNR |
+| **噪声参考** | 噪声绝对功率（dBm，在噪声带宽内） | 信号电平变化，噪声不变，每个点的 SNR = 信号功率 − 噪声功率 | 标准解调性能测试、固定噪底找门限 |
 
-**处理顺序**：
-原始 IQ → ① Invert → ② I/Q 幅度和相位失衡 → ③ Phase Noise（暂时不做？） → ④ AWGN 加噪 → ⑤ 峰值归一化 / AutoScale → ⑥ I/Q Offset → ⑦ 最终量化为 int16发射机可接受范围
+**两种方式都只用一组参数。** 噪声参考虽然每个点的 SNR 不同，但用户设置的是一个固定的噪声功率，属于简单版范围，不属于情况 1。
 
-UI 交互上，模仿VSG60，Impairments 模块提供独立页面和开关，针对大部分数字调制，模拟调制，均可生效，用户可以通过界面直接调整各项损伤参数，使能后，系统会重新处理波形IQ下发播放。
+## 二、为什么需要 FPGA 的“数字补偿 + 与扫描同步”
 
-**开放策略调整为：P0 的通用 IQ 算法面向所有常规单记录离线 Baseband，Digital、普通 ARB、Multitone 是首批接入与验收样本，不是永久白名单。** 对 AM/FM/PM、DSSS、OFDM、Ramp、Pulse，没有仅因调制名称就禁用的算法依据；完成相同入口接入和各自验收后即可开放。Streaming、内建纯 AWGN、硬件 CW 和复杂序列另列边界，不能仅凭“Baseband”名称一概承诺支持。
-
-## 现有依据与功率口径
-
-当前[需求文档](信号损伤功能需求文档.md)已经区分了硬件补偿与 IQ 处理。本方案补充交互合同，并提出两项明确调整：
-
-- 需求中“RF Level 指总输出功率”的建议不能直接套用到当前软件。现有 Level、PEP、RMS 使用满幅参考和实际波形统计；首版保留现有定义，增加损伤后总 RMS 与分量功率估算。
-- 需求中“Pulse 建议按开启时段计算”需要显式时间门。普通 ARB 也可能包含 burst、空闲和补零，不能通过文件名或非零采样自动猜测开启段。首版统一使用实际播放记录的全记录平均，开启段参考后续独立提供。
-
-VSG60 官方手册明确把 AWGN 和 I/Q 幅相失衡限制在 Digital Mod/ARB，而频谱反转作用于所有送入设备的 IQ；这些是该软件的支持边界。它并未证明模拟调制或多音不能叠加 AWGN。[官方 Impairments 说明](https://www.signalhound.com/sigdownloads/VSG60/docs/html/index.html#impairments)
-
-当前 SGStudio 的 HTRA AWGN 已有纯噪声生成与 FIR低通滤波器实现；其参数只有带宽和长度，没有目标信号输入或 SNR。这是可复用的算法基础，不是现成的叠加功能。Digital 当前采用编辑后自动生成、使能后自动下发；本方案只对新增损伤设置采用批量 Apply，保留既有波形编辑行为。
-
-## 第一层 算法难度与 Baseband 开放范围
-
-### 1.1 Level Offset 与 User Flatness
-
-这两项属于 RF 输出链，与 IQ 的调制种类无关，不需要重新生成波形。
-
-- Level Offset：固定输出使用 `Lrequest = Lnominal + Loffset`；LScan 的起止电平和 MScan 每点电平按同一规则换算。修改步进的基准，不改变扫描步长。
-- User Flatness：将频率—补偿表交给 `channel_config_amplitude_compensation()`。软件用同一曲线规则计算展示和可行性检查；SDK 已加表补偿时，软件不得再次把表值加到 Level 请求。
-- 按当前需求中已确认的硬件行为，频点间线性插值，表外用相邻两点线性外推，叠加工厂校准。若需要外推，至少需要两个有效点；单点作为常量补偿是否允许须由 API 合同明确，首版表编辑按至少两点设计。
-- 检查补偿后的实际输出需求是否在设备能力内，保留 UNLEVEL 反馈；名义电平与硬件电平的回写换算不能遗漏。
-
-**难度低，跨模式接入为低到中。** 主要工作是表格、持久化、连接后恢复、扫描校验和回写；不受 AWGN 的离线处理限制。
-
-### 1.2 Frequency Offset
-
-`tx_stream.fc_offset` 或 IQ 数字混频加入同一偏移。这样不需要重采样、不改变 IQ 记录，也不受调制类型限制。CW 可以使用；扫描模式继续定义为不应用用户频偏，已有 provider 在扫描中的补偿规则保持原状。
-
-**算法难度低，接入低到中。** 重点在名义频率/设备配置频率的换算、边界校验和回读。固定 Playback 已有 FFM-only 快捷路径，应复用它的准入和重新 arm 行为；不能承诺更新频偏绝对无中断。
-
-### 1.3 AWGN 按 SNR 叠加
-
-设输入复基带为 `x[n] = I[n] + jQ[n]`，先完成本次 I/Q 失衡得到 `s[n]`。AWGN 算法对所有非零离线 IQ 使用同一套步骤：
-
-1. 确定逻辑播放记录、Fs 和噪声总带宽 Bn；在整个逻辑记录上统计 `Ps = mean(|s[n]|²)`，包含记录内的空闲和补零。
-2. 生成 I/Q 两路独立、零均值、同方差的高斯随机序列，组合成复噪声，再进行带限滤波。现有 `AwgnModulator` 的随机生成和 FIR 可以提取复用。
-3. 对滤波后噪声计算指定 Bn 内的参考功率 `Pw,Bn`，设置 `α = sqrt(Ps / (10^(SNR/10) × Pw,Bn))`，叠加 `u[n] = s[n] + αw[n]`。用可复现的滤波响应积分/带内功率统计实现定标，并验证过渡带误差，不能拿未滤波白噪声功率直接替代。
-4. 为后续 I/Q Offset 预留余量，必要时对整个 `u[n]` 使用同一缩放系数，再量化。信号和噪声不能各自做峰值归一化。
-5. 重新计算最终样点的 RMS、PEP/PAPR，输出数字定标结果及其参考带宽；量化误差与硬件本底不被当成理想 AWGN 的一部分。
-
-**相加本身简单，完整实现为中到高难度，是 P0 的主要工作量。** 原因是噪声滤波、功率统计、全记录峰值、多遍处理、循环噪声与大内存约束，而不是 QAM、AM 或 FM 需要不同加噪算法。无带限的基本生成/叠加为 O(N)，直接 FIR 为 O(NK)，K 为滤波抽头数。
-
-Playback 的噪声应按循环记录处理滤波边界，避免每次循环出现固定的首尾瞬态。固定种子须同时固定随机生成算法和状态推进顺序；分块只是内存组织方式，不应改变同一配置的数字结果。首版保留有限记录循环行为，不扩展成实时不重复噪声发生器。
-
-### 1.4 I/Q 幅度失衡与相位失衡
-
-两者可以合并为一次逐样点的 2×2 实矩阵运算，不需要识别调制符号或重新运行调制算法。以下作为 SGStudio 的建议参数定义，不声称复现 VSG60 内部实现：
+### 2.1 信号链决定了前端做不到
 
 ```text
-A = 幅度失衡 dB，正值表示 I 路相对 Q 路增益更大
-φ = 正交相位误差，正值表示两个基向量的夹角从 90° 增至 90° + φ
-gI = 10^( A/40)
-gQ = 10^(-A/40)
-θ = φ/2，计算三角函数前换成弧度
-
-I' =  gI cos(θ) I - gQ sin(θ) Q
-Q' = -gI sin(θ) I + gQ cos(θ) Q
+数字基带（信号 s，FPGA 内可叠加噪声 n）→ DAC → 调制器 → 模拟增益/衰减（由 level[i] 控制）→ RF 输出
 ```
 
-因此 `20log10(gI/gQ) = A`；A=0、φ=0 时恰好为原始 IQ。每次参数变化预计算矩阵，样点循环只做乘加。设置范围应限制在产品明确支持的非退化区间，不因数学公式可输入任意角度就全部放开。
+LScan/MScan 每一步改变的是模拟增益 `G_i`。只要噪声在模拟增益之前叠加，输出就是 `G_i · (s + n)`：信号和噪声一起缩放，SNR 不变，噪底跟着电平移动。这只能满足载波参考，不能满足噪声参考。
 
-**算法难度低，O(N)。** 对 QAM、OFDM、多音可明显看到镜像或星座变化；对固定相位、对称频谱或只激励一个基向量的波形，某些缺陷可能只表现为幅度/相位变化。这属于测试敏感度差异，不构成禁用算法的理由。
-
-### 1.5 I/Q Offset
-
-按最终 int16 counts 定义两个常量，使用：
+要让噪声功率固定，就必须让每个扫描点的数字信号/噪声比例跟着 `G_i` 反向变化：
 
 ```text
-Iout[n] = quantize(k × Iprocessed[n] + Ioffset)
-Qout[n] = quantize(k × Qprocessed[n] + Qoffset)
+SNR_i = (level[i] + 信号 RMS) − 噪声功率
+数字支路：信号与噪声按 SNR_i 配比，总量保持固定的数字余量
+模拟增益：按 level[i] 和总功率设置
 ```
 
-k 是信号与新增噪声共用的比例。先根据最终 I/Q 峰值和偏置确定可用余量，再加 Offset；只有超过原量化范围时才需要额外衰减，不默认把所有波形重新放大到满幅。所有 IQ 损伤关闭时直接沿用原样点，避免“加了处理模块却改变原输出”。
+前端 IQ 层做不到，原因是：
 
-**算法难度低，O(N)；与满幅、手动 IQScale 的联动为中等工作量。** 有意输入的 Offset 不应被后续去均值、AutoScale 或校准步骤消掉。偏置是 IQ 直流分量，其 RF 位置服从当前上变频映射；不能无条件宣称它就在名义中心，也不能承诺某 counts 一定对应某 dBc 泄漏。
+1. Playback 扫描只能用一个预先下载的波形，`startListSweepLocked` 明确报错“Playback MScan currently supports a single waveform only”，而这里每个点需要不同的信号/噪声比例。
+2. 扫描点和回放波形之间没有绑定关系，主机也拿不到跳频时刻：没有跳频事件，也没有时间戳。Streaming 模式即使实时生成 IQ，也无法与毫秒级 dwell 对齐。
+3. 预先加在 IQ 里的噪声和信号经过同一个 `G_i`，无法让它们分开变化。
 
-### 1.6 为什么先接三个业务 其他 Baseband 如何开放
+### 2.2 为什么补偿必须由 API/FPGA 计算，而不是前端算好每点增益再下发
 
-此前先列 Digital、普通 ARB、Multitone，是为了用三个代表性入口覆盖“外部库生成”“文件读取”“本地生成”，并便于观察 BER/EVM、外部 IQ 与镜像音。这是实施顺序和验收便利性的选择，**没有证据表明它们以外的常规离线 IQ 需要另一套 P0 算法**。
+- **只有 API/FPGA 知道真实的增益分配。** 每个点的输出功率由衰减器步进、按频率和温度的工厂校准、User Flatness 共同决定。如果前端计算每点的噪声增益，就要复制一份校准规则，产生第二份业务实现。
+- **补偿必须与模拟增益和本振切换在同一时刻生效。** FPGA 本身就在执行扫描调度，它能在每个点的切换和建立时间内同时改变数字配比；主机的软件延时和缓冲做不到这一点。
+- **前端下发每点增益数组，本质上就是“每点参数不同”的接口。** 那是情况 1 的基础设施，不属于简单版。
 
-当前 AM/FM/PM、Pulse、Ramp、Multitone 都使用本地 builder 并通过 `HTRA::GeneratedPlayback::publishPayload()` 发布；Digital/DSSS/OFDM 都存在外部库返回 int16 并转交 payload 的路径。因此在共享可写阶段接入后，同类业务应一起扩大开放范围，不再逐个寻找“为什么数学上不支持”的理由。
+因此简单版的接口是：前端只下发**一个**噪声功率或 SNR，FPGA 根据 `level[i]` 和自身的增益规划，在每个扫描点内部计算并切换补偿。
 
-| Baseband / 路径 | 算法适用性 | 接入与验收要求 |
+### 2.3 能力边界
+
+- **可达 SNR 有上限。** 设备自身的本底噪声（DAC 量化噪声、模拟噪声）会随电平一起变化。当 `SNR_i` 接近设备自身的 SNR 时，噪声就无法再保持固定。
+- **可达 SNR 有下限。** SNR 很低时，信号在数字域只占很小的比例，受 DAC 动态范围和余量限制。
+- **信号功率不变需要模拟余量。** FPGA 为噪声留出数字余量后，需要用模拟增益补回信号功率；最大电平附近可能达不到，需要报 UNLEVEL。
+
+这些范围由 API 在配置时针对每个扫描点预先检查，并通过查询接口返回，不允许静默钳位。
+
+### 2.4 FPGA 噪声源的其他收益
+
+即使不考虑扫描，FPGA 噪声源也明显优于前端 IQ 加噪：
+
+- 噪声不重复：Playback 循环时噪声每次都不同，长时间 BER 统计才可靠。
+- 修改 SNR 不需要重新生成和下载波形，大波形尤其受益。
+- CW、Playback、Streaming 和各种扫描都能使用。
+- 不占用主机 CPU（树莓派上很重要），也不需要为加噪重新做峰值归一化。
+
+## 三、FPGA 具备该能力后各功能的划分
+
+| 功能 | 实现位置 | 当前状态 | 说明 |
+| --- | --- | --- | --- |
+| Level Offset | 前端换算，经 API 下发 | 已具备 | 名义电平加 offset 后下发给 FFM/LScan/MScan；**噪声参考的噪声功率也要加同一个 offset** |
+| User Flatness | API `channel_config_amplitude_compensation` | 已具备 | 按 RF 频点线性插值，表外按相邻两点线性外推，叠加在工厂校准之上，支持 FScan/MScan；噪声和信号经过同一模拟链，按同一参考面补偿 |
+| Frequency Offset | API：下发 `fc + Δf` 给 FFM | 已具备 | 推荐 `fc + Δf`，而不是 `tx_stream.fc_offset` 数字搬移：载波真正移动后，镜像和噪声中心都以偏移后的载波为中心，与真实的本振误差一致。扫描模式下默认不叠加用户频偏 |
+| Sample Rate Error | API：`realtime_srate` / `playback_srate` 下发 `Fs·(1+ε)` | 已具备 | 分辨率约 0.1 Hz，下次启动输出时生效；400 MHz 孤立点以后会改为连续区间 |
+| LO 模式（Low Spur） | API `channel_config_lo_mode` | 已具备 | 是性能选项，不是损伤 |
+| **AWGN** | **FPGA** | 需新增 API | 支持载波参考和噪声参考，扫描时 FPGA 同步补偿 |
+| **Invert、I/Q 幅度/相位失衡、I/Q Offset** | **FPGA（建议与 AWGN 一起做）** | 需新增 API | 成本很低：FPGA 已有工厂校准用的 I/Q 矩阵和直流修正，增加一组用户参数即可。需要 API 方确认 |
+| Phase Noise | FPGA（后续可选） | 未计划 | 简单版不做；放在 FPGA 后，CW 也能加相噪 |
+| Channel Filter（静态多径） | 前端 IQ | 低优先级 | 高采样率下复数 FIR 占用大量 FPGA 资源；Playback 用循环卷积 |
+| Timebase Offset | 无 | 缺接口 | 暂不做 |
+
+如果 FPGA 不做 Invert/失衡/Offset，这几项就退回前端 IQ 层实现，处理顺序见 3.1。
+
+### 3.1 处理顺序
+
+```text
+前端 IQ：  原始 IQ →（Channel Filter，P2）
+FPGA：    Invert → I/Q 幅度/相位失衡 → I/Q Offset →（Phase Noise，后续）→ 叠加 AWGN → 工厂校准 → DAC
+API/RF：  fc + Δf、level + Level Offset、Flatness、扫描调度
+```
+
+- 用户的失衡和 Offset 作用在**信号支路**，在叠加噪声之前生效，所以噪声保持圆对称，SNR 的定义不受失衡影响。如果 FPGA 是直接修改工厂校准矩阵来实现失衡，噪声也会被一起处理，API 方需要说明采用哪种方式。
+- Invert 放在最前面，后续参数都在 RF 坐标系下定义：正频偏向上，Q Offset 的符号与输出一致。
+- Channel Filter 在前端执行，所以它在 FPGA 的失衡之前。真实链路中信道应该在发射机缺陷之后，这一差异作为产品定义接受，等 Channel Filter 排期时再评估。
+
+### 3.2 三种情况在简单版中的处理
+
+| # | 情况 | 简单版 | 替代方式 |
+| --- | --- | --- | --- |
+| 1 | 一次硬件扫描中每个点的损伤参数不同 | 不支持 | SCPI 逐点：设频率/电平 → 设 SNR → 等待建立 → 测量。有了 FPGA AWGN，修改 SNR 不需要重新下载，逐点循环很快 |
+| 2 | 损伤随载波频率变化 | 不支持 | SCPI 逐点设置；ppm 型频偏由前端换算成每点 `fc[i]`，不属于此情况 |
+| 3 | 扫描中保持噪底固定 | **支持（依赖 FPGA）** | 噪声参考 + FPGA 同步补偿 |
+
+## 四、简单版的范围
+
+- 所有扫描点使用同一组损伤参数：同一个 SNR 或同一个噪声功率、同一组失衡和 Offset。
+- 扫描基带沿用现有约束：Playback 扫描只用单个波形，也可以使用 Streaming 或 CW。
+- AWGN 在 CW、Playback、Streaming 以及 FScan/LScan/MScan 下都可用，具体以 API 能力查询结果为准。
+- 不支持按点切换参数，不支持“点与波形绑定”，不支持随频率变化的损伤。
+
+## 五、API 需要提供的接口
+
+下面的结构体和函数名是需求草案，沿用 h2_api.h 的命名和 `extension1/extension2` 风格，最终以 API 方的定义为准。建议做成**通道级**的配置函数，与 `channel_config_amplitude_compensation` 一致，不依附 `tx_stream`，这样重新配置 stream 时损伤设置不会丢失。
+
+### 5.1 已有接口：沿用并确认
+
+| 接口 | 用途 | 需确认的点 |
 | --- | --- | --- |
-| Digital、普通 ARB、Multitone | 五项 P0 均适用，零输入的 AWGN 除外 | 首批打通三种数据来源；不作为最终功能白名单 |
-| AM/FM/PM、Ramp | 与其他离线 IQ 使用同一算法 | 接入本地发布前处理；验证幅度、谱方向、扫频包络与损伤后指标 |
-| DSSS、OFDM | 与 Digital 相同 | 接入外部 IQ 发布前阶段；验证库缓冲区权限、裁剪长度和 OFDM 峰均比 |
-| Pulse | 算法适用 | 首版固定全周期平均 SNR；噪声和 DC 在记录的脉冲关断段也存在，不能再次用脉冲门清零 |
-| IQS 单记录回放、QuickWaveform | 解码成单记录 IQ 后适用 | 校验其 AutoScale、选区、period 和原有格式语义；未接入路径不提前标为已支持 |
-| ProgrammedArb、跳频/多波形序列 | 单段算法适用，整序列语义需定义 | 明确逐段或全序列功率参考、噪声跨段连续性与各段采样率，再开放 |
-| Streaming | 本轮排除 IQ 处理 | 另行解决实时吞吐、滤波状态、幅度余量与不能预扫全记录的问题 |
-| 内建纯 AWGN | 本轮排除 IQ 损伤 | 不设置“有用信号/新增噪声”的相对 SNR；其他缺陷有数学效果，但不在当前需求内 |
-| 硬件 TX_CW / MOD 关闭 | 不进入 IQ 处理链 | 仍可使用硬件 Level/Flatness/固定频偏，不暗中替换为常数 IQ Playback |
+| `tx_config_ffm` / `tx_config_lscan` / `tx_config_mscan` | Level Offset、Frequency Offset 换算后下发 | 开启 AWGN 后的最大可用电平（见 5.3 的合同） |
+| `channel_config_amplitude_compensation` | User Flatness | 已确认；噪声与信号按同一参考面补偿 |
+| `tx_stream.realtime_srate` / `playback_srate` | Sample Rate Error | 已确认分辨率和生效时机 |
+| `channel_config_lo_mode` | LO 模式 | 无 |
 
-UI 只对已接入、已验收的路径开放；分批交付期间可显示“当前路径尚未接入”，不能写成“AM 不支持 AWGN”这类永久性结论。输出补偿和固定频偏按设备/载波模式决定可用性，不跟随 IQ 损伤的开放名单。
+### 5.2 新增：能力查询
 
-## 第二层 接入现有 IQ 生成与下发链路
+```c
+typedef struct
+{
+    uint8_t  awgn_supported;           // 是否支持 AWGN
+    uint8_t  awgn_noise_ref_supported; // 是否支持噪声参考（扫描同步补偿）
+    uint32_t awgn_tx_modes;            // 支持的模式位掩码：TX_CW / TX_REALTIME / TX_PLAYBACK
+    double   awgn_bandwidth_min;       // 噪声带宽下限（Hz）
+    double   awgn_bandwidth_max_ratio; // 噪声带宽上限，相对当前采样率的比例
+    float    awgn_snr_min;             // SNR 下限（dB）
+    float    awgn_snr_max;             // SNR 上限（dB）
 
-### 2.1 当前链路与准确的插入位置
+    uint8_t  iq_impairment_supported;  // 是否支持 Invert / 失衡 / Offset
+    float    gain_imbalance_max;       // 幅度失衡绝对值上限（dB）
+    float    phase_imbalance_max;      // 相位失衡绝对值上限（度）
+    float    iq_offset_max;            // I/Q Offset 绝对值上限（满量程比例）
 
-当前主要 Playback 链路为：
+    void* extension1;
+    void* extension2;
+} tx_impairment_capabilities;
 
-```text
-业务参数与设备能力 → generation plan → 后台生成 / 解码 / 原有缩放
-→ 可写 IQ（本地 builder 或尚未移交的外部缓冲区）
-→ publish() / adoptExternal() → 不可变 PlaybackPayload + TxPowerMetrics
-→ buildPlaybackExecutionContext() → TxSessionService
-→ TxPipelineRuntime → 设备 I/O 线程中的 TxPipelineExecutor
-→ FancyDevice::downloadDataSequence() → H2 下载与原有启动/触发流程
+H2_API int channel_tx_query_impairment_capabilities(channel* ch, tx_impairment_capabilities* capabilities_o);
 ```
 
-建议在 **IQ 源记录和原有缩放已经确定、不可变 payload 尚未发布** 的位置插入共享处理。该阶段已有 Fs、样点数与可写数据，不需要 UI 参与。当前不存在可在下载前随意修改的统一浮点缓冲区；已发布 payload 仅允许 const 读取，不能在 executor 内 `const_cast` 后原地加噪。
+单独提供查询函数，不修改现有 `tx_channel_capabilities` 的布局。前端只根据这个查询结果开放 UI，不按型号硬编码。
 
-P0 的处理顺序为：
+### 5.3 新增：AWGN
 
-```text
-合法源 IQ / 原有 AutoScale、IQScale / 选区与 period 补零
-→ I/Q 幅相失衡
-→ 带限 AWGN 定标与叠加
-→ 必要的统一衰减，为 Offset 预留余量
-→ I/Q Offset → 最终 int16 量化
-→ 短记录按设备最小长度重复 → 最终功率统计 → 发布 payload
+```c
+#define AWGN_REF_CARRIER   0   /* 载波参考：SNR 固定 */
+#define AWGN_REF_NOISE     1   /* 噪声参考：噪声功率固定 */
+
+typedef struct
+{
+    uint8_t  state;              // STATE_OFF / STATE_ON
+    uint8_t  reference;          // AWGN_REF_CARRIER / AWGN_REF_NOISE
+    double   bandwidth;          // 噪声总带宽（Hz），以信号中心为中心
+    float    snr;                // 载波参考：带宽内的信号/噪声功率比（dB）
+    float    noise_power;        // 噪声参考：带宽内噪声总功率（dBm），与 level 同一参考面
+    float    stream_signal_rms;  // TX_REALTIME：主机提供的信号 RMS（dBFS）
+    uint64_t seed;               // 0：自动；非 0：可复现
+
+    void* extension1;
+    void* extension2;
+} tx_awgn;
+
+typedef struct
+{
+    double bandwidth_actual;     // 实际生效的噪声带宽（滤波器量化后）
+    float  snr_min_actual;       // 当前载波计划各点中的最低 SNR（dB）
+    float  snr_max_actual;       // 当前载波计划各点中的最高 SNR（dB）
+    float  noise_power_actual;   // 实际噪声功率（dBm）
+    uint32_t clip_count;         // 数字饱和计数
+
+    void* extension1;
+    void* extension2;
+} tx_awgn_status;
+
+H2_API int tx_config_awgn(channel* ch, const tx_awgn* setting);
+H2_API int tx_query_awgn(channel* ch, tx_awgn* setting_o, tx_awgn_status* status_o);
 ```
 
-附属 Invert 若纳入，可放在 I/Q 失衡之前。已量化的源数据先在小块内提升计算精度，组合运算后再写回 int16，避免每个损伤单独量化。关闭 IQ 损伤时保持原有直接生成/发布路径。
+需要 API 方明确的合同：
 
-**区分两种长度操作：** ARB 的 period 补零属于逻辑波形，要参与全记录 SNR；`fillNormalizedPlaybackPayloadTail()` 则是重复短记录以满足最小下载字数，不是再补零。建议先处理一个逻辑周期，再重复已处理记录，因此噪声实际重复周期是逻辑周期/Fs，不能误显示成较长的下载缓存时长。
+1. **信号功率不变。** 同一个 level、同一个波形，开启 AWGN 前后信号支路的 RF 功率相同，噪声额外叠加，总功率增加。FPGA 内部的数字余量和模拟补偿由 API 负责，前端不关心。
+2. **信号 RMS 从哪里来。** Playback 建议由 API 在 `tx_download_waveform` 时计算每个波形的 RMS（全记录平均，包含空闲段和补零），并通过查询接口返回，供前端显示和核对。多波形序列中每个波形使用各自的 RMS。Streaming 模式无法预先统计，由主机通过 `stream_signal_rms` 提供（AutoScale 时已知）。CW 的信号 RMS 按 0 dBFS 处理。
+3. **噪声参考与扫描。** FScan/LScan/MScan 下，FPGA 根据每个点的 `level[i]`、工厂校准和 Flatness 计算该点的信号/噪声配比，并与该点的频率和电平切换同时生效。配置时对所有点预先检查，任何一点超出可达 SNR 范围就返回明确的告警或错误，不静默钳位。
+4. **参考面。** `noise_power` 与 `level` 在同一参考面上：已包含 Flatness，不包含前端的 Level Offset（Level Offset 由前端对两者做同样的换算）。
+5. **噪声中心。** 噪声以信号中心为中心。如果使用 `tx_stream.fc_offset` 做数字搬移，需要说明噪声是在搬移之前还是之后叠加。
+6. **生效时机。** 希望输出过程中修改 SNR 或噪声功率能立即生效，不需要重启输出。如果只能在下次启动时生效，需要明确说明，前端会按此提示用户。
+7. **不重复。** 噪声发生器的周期远大于任何实际测试时长；`seed` 非 0 时，同一配置的输出可以复现。
+8. **带宽。** 实际带宽会因滤波器而量化，通过 `bandwidth_actual` 返回。修改采样率后，带宽仍然按绝对 Hz 定义，超出范围时报错。
 
-### 2.2 各来源的接入点
+### 5.4 新增：I/Q 损伤（建议与 AWGN 一起做）
 
-| 来源 | 当前代码证据 | 建议改动边界 |
-| --- | --- | --- |
-| HTRA 本地生成 | `ammodulator/fmmodulator/pmmodulator/pulsemodulator/rampmodulator/multitonegenerator` 创建 builder，调用 `GeneratedPlayback::publishPayload()` | 在共同 finalize 流程中、复制重复尾部之前调用共享处理；各业务只传参数快照，不各写一套算法 |
-| 普通 ARB / IQS 文件 | `arbdatagenerator.cpp::buildFilePlaybackPayload()` 读取选区、执行原 AutoScale/IQScale、处理 period，最后 `builder.publish()` | 源缩放与逻辑记录确定后加损伤；改用最终样点重算 metrics，不能保留加噪前的指标 |
-| Digital / DSSS / OFDM | 对应 modulator 在外部库返回 IQ 后，直接 `adoptExternal()`；需最小长度扩展时走 builder 分支 | 两个分支都在发布前接入。外部返回值是 `short*`，但指针类型本身不证明 SDK 允许修改；实施前确认生成期间独占可写契约 |
-| Core 执行层 | `IPlaybackBusiness` 提供尺寸/功率工具；executor 用 const storage view 下载，下载后 `releaseStorage()` | 保留下载协议和不可变语义，消费新结果；不在设备 I/O 线程执行耗时 DSP |
+```c
+typedef struct
+{
+    uint8_t state;              // STATE_OFF / STATE_ON
+    uint8_t invert;             // 频谱反转：Q 取反
+    float   gain_imbalance;     // dB；正值表示 I 路增益相对 Q 路更大
+    float   phase_imbalance;    // 度；正值表示 I/Q 基向量夹角大于 90°
+    float   i_offset;           // I 路直流偏置，相对信号满量程参考的比例
+    float   q_offset;           // Q 路直流偏置，同上
 
-共享 DSP 放在两类插件都能依赖的公共库，例如当前已有的 `src/libs/utils`；与 payload 发布、功率结果组合有关的薄接入放在 Core/既有 finalize 边界。不要让 Analog 为调用噪声处理而依赖 HTRA 插件。具体函数/类型以实施时最小接口为准，本方案不要求另建管理器或第二条下载管线。
+    void* extension1;
+    void* extension2;
+} tx_iq_impairment;
 
-外部库缓冲区的释放仍由生成任务持有的对象负责，成功 adopt 后只由 payload 的既有 deleter 释放。若 SDK 不允许发布前原地修改，必须重新确定可写输出交接方案及其内存成本；不能以复制另一份 1000 MiB IQ 或修改 SDK 为默认解法。
-
-### 2.3 AWGN 的多遍计算与大波形内存
-
-现有链路会在同步下载返回后释放 host storage，且大 payload 使用独占租约。损伤改变时，应根据原始生成参数/文件重新物化；不能假设上次下载的数据还在内存，也不能在上次已损伤的结果上继续叠加。
-
-建议采用“一份可写 int16 源/结果 + 有界浮点工作块 + 固定种子多遍计算”：
-
-1. 只读遍历源记录，计算 I/Q 失衡后的 Ps，并确定噪声滤波和定标。
-2. 用确定的噪声序列遍历，求叠加后峰值及 Offset 所需统一比例；此时不覆盖原始样点。
-3. 重置到相同噪声起始状态，在有限工作块中重新组合运算并写回最终 int16；累计最终功率指标。
-
-若带内标定需要单独的噪声统计遍历，可增加噪声遍历，不分配第二份全长浮点波形。分块间保持 FIR 历史，循环边界处理在每遍一致。此多遍方案只保证损伤处理阶段不引入第二份同级大缓冲区；源生成器自身的外部缓冲区/短记录扩展仍遵守现有租约和所有权。
-
-源参数、Fs、记录长度、种子、所有损伤参数及设备能力版本属于同一次生成快照。复用现有 generation/revision 和旧结果丢弃规则，避免 Apply 后又快速切波形时，旧的加噪结果覆盖新请求。任务持有数据与参数，不借用可能关闭的面板控件；失败不发布半处理 payload。
-
-### 2.4 硬件参数走原有配置链
-
-- **Level Offset：** 在设备配置边界统一把名义电平换算为硬件请求；覆盖 Fixed、LScan、MScan 的相应电平点。回写必须识别其参考面，不能把硬件电平回填为新的名义值后，下次又加一次 Offset。
-- **User Flatness：** 由设备 owner 在串行 I/O 域下发 enable/table，连接/设备切换后按当前通道恢复。新表必须进入配置请求比较与成功快照，不能被现有“参数没变”的快捷路径略过。仅改变补偿表不需要重新做 IQ DSP。
-- **Frequency Offset：** 用户值与 `fixedPlaybackCenterOffsetHz` 分开保存，在配置边界组合；回写与显示恢复名义/用户语义。既有多音补偿保持独立，不当作新的用户频偏。
-- **Apply 与缓存：** 只改变硬件参数时尽量复用驻留 IQ；只有 Fs、源内容或 IQ 损伤改变才生成新 payload identity。新配置走现有 request/runtime/executor，不让 UI 直接调用 H2。
-- **功率显示：** 当前 `publishDeviceConfigurationWriteback()` 会把设备 level 写入 effective request，`rmsPowerDisplayForRequest()` 再加 waveform RMS offset。因此引入 Level Offset/Flatness 必须同步明确 effective level 的参考面，端口估算用有效硬件参考，名义参考扣除已知补偿；不能对同一补偿漏加或加两次。
-
-多音等有 provider 频率补偿时，噪声中心、I/Q DC 的 RF 位置也要用实际 IQ→RF 映射显示，不能只用主界面的名义中心推算。这是接入验收项，不是禁用多音的理由。
-
-### 2.5 保持现有产品合同
-
-生成完成不等于下发完成，下发完成也不必然等于已触发输出。继续由现有运行时完成结果驱动 applied/RMS/UI；不额外创建一套面板“已生效”状态。
-
-Save IQ 仍区分完整导出与截断播放，使用同一共享处理规则但各自对实际记录定标。硬件频偏/补偿不写进 IQ 样点。SCPI、Minibar 复用同一个参数 owner 和业务校验；本次文档不扩展命令协议或持久化格式，实施时再确认相应合同。
-
-## 第三层 UI 交互设计
-
-保留原方案的公共入口、AWGN 主视图与批量 Apply，以下只按五项 P0 调整分组和提示。界面默认先展示 AWGN，与先交付简单硬件配置的实施顺序并不冲突。
-
-### 3.1 界面入口与分组
-
-在现有中央业务区增加公共导航：“波形设置｜损伤与补偿”。右侧调制列表继续只选择波形源；损伤不是一个与 Digital、Multitone 并列的波形源。顶部 Frequency、Level、RMS、RF、MOD、扫描、Home 保持现有职责。
-
-“损伤与补偿”打开同一个公共面板，显示当前编辑对象，例如“Digital · 16QAM · Fs 20 MS/s”；如果实际输出与浏览对象不同，另显示“当前输出：Multitone”，不能把页面选中态当作设备生效态。当前输出摘要保持可见，例如“AWGN 20 dB · Bn 5 MHz · IQ 非零”。
-
-面板内部只有三个页签：
-
-| 页签 | 内容 | 默认展示 |
-| --- | --- | --- |
-| AWGN | 叠加开关、SNR、噪声带宽、功率参考、噪声重复周期与高级种子 | 首次进入默认打开；开发优先级仍按五项 P0 表执行 |
-| I/Q 与频偏 | 幅度失衡、相位失衡、I Offset、Q Offset、Frequency Offset | 五项 P0 参数块；Invert 如纳入附属项占第六格 |
-| 输出补偿 | Level Offset、User Flatness 开关、曲线编辑、当前频点补偿值 | 与损伤分组独立，复位损伤不清除补偿 |
-
-不把未实现的相噪、多径等排成整屏灰色项目。对当前不适用的已实现功能保留页面位置，展示一句明确原因，如“纯 AWGN 是噪声源，不能按信号 SNR 再叠加噪声”。
-
-#### AWGN 主视图
-
-```text
-当前编辑：Digital · 16QAM     Fs 20 MS/s       当前输出：Digital
-波形设置 | 损伤与补偿
-AWGN       I/Q 与频偏       输出补偿
-
-AWGN 叠加      [开启]
-目标 SNR      [20.0 dB]           噪声带宽 [自动 ▾] [5.000 MHz]
-功率参考      全记录平均           噪声范围：fc − 2.5 ～ fc + 2.5 MHz
-
-预期新增噪声 / 输入信号功率：1.00%
-损伤后总 RMS：生成后显示           信号 / 新增噪声：生成后显示
-噪声重复周期：10.000 ms           [高级：固定种子 1]
-
-待应用：SNR 由 25 dB 改为 20 dB
-设备当前：AWGN 25 dB             [撤销修改] [应用并更新输出]
+H2_API int channel_config_iq_impairment(channel* ch, const tx_iq_impairment* setting);
+H2_API int channel_query_iq_impairment(channel* ch, tx_iq_impairment* setting_o);
 ```
 
-数值只是布局示例。生成前不伪造精确功率或实时频谱。基础界面不放必需的频谱大图，用户确认变化主要依靠 SNR、带宽、功率和实际生效状态；后续预览若加入，应明确标记“软件计算”，并与下发共用处理结果。
+需要 API 方明确：
 
-#### 5 寸屏布局
+- 正负号约定与上面的注释一致，UI 和 SCPI 使用同一约定。
+- 作用在信号支路，在叠加噪声之前（见 3.1）。
+- Offset 以信号满量程为参考，开启 AWGN 后 FPGA 内部的数字余量不会改变 Offset 对应的 dBc。前端负责把 Offset 换算成相对信号 RMS 的 dBc 显示给用户。
+- 叠加在工厂校准之上，不改写工厂校准值。
 
-沿用 Instrument 的 23–24 px 主要参数文字、64 px 双行参数块与不小于 48 px 的操作按钮。中央区按三列两行摆 AWGN 基础项，I/Q 与频偏也用三列两行；详情通过当前页内替换进入，不叠加多层小弹窗。数值编辑沿用软键盘，单位可直接选 Hz/kHz/MHz、dB、°、counts。
+### 5.5 后续可选：Phase Noise
 
-以 600 px 全高预算：现有顶部区约 80，业务导航与对象约 56，内部页签 48，参数两行 128，统计与状态两行约 96，底部操作 48，边距/间距约 48，总计约 504 px。实现时以实际主窗可用区核定；空间不足将高级信息移入详情，不缩小核心字号。不要在已经排满的 Home 四列中硬塞多个损伤入口。
+简单版不做。如果以后做，建议的接口是 `channel_config_phase_noise(ch, state, offsets[], dbc_hz[], points)`，即一条与载波频率无关的附加相噪曲线。
 
-桌面使用相同分组，可在右侧并列统计说明；触屏使用同一模型，减少同时显示的详情。
+### 5.6 通用要求
 
-### 3.2 AWGN 参数与功率合同
+- `channel_preset` 把所有损伤恢复为关闭或零；`device_close` 后不保留设置，由前端在连接设备后恢复。
+- 新增告警码，并在 `device_query_discription_retval` 中提供描述：SNR 在某个扫描点超出可达范围、数字饱和、开启 AWGN 后电平达不到（UNLEVEL）。
+- 所有新接口都有对应的查询函数，前端用查询结果回写 UI，不以请求值代替实际值。
 
-#### 最少的基础参数
+## 六、前端工作
 
-| 字段 | 建议交互与定义 |
-| --- | --- |
-| AWGN 叠加 | 默认关；关闭保留 SNR、带宽、种子。关闭操作也经 Apply 生效 |
-| SNR | 默认 30.0 dB，步进 1 dB，允许小数输入；这是产品建议值，不是 VSG60 默认值。范围由实现与量化验证确定，不把可输入上限宣传为 RF 可达 SNR |
-| 噪声带宽 Bn | 自动/手动；始终显示解析后的实际数值。是复基带总宽度，中心在 IQ 0 Hz，即实际 IQ 上变频参考两侧各 Bn/2；有 provider 补偿时按实际映射显示 |
-| 功率参考 | 首版只读“全记录平均”，不放一个只有一项的下拉框 |
-| 噪声种子 | 高级项，默认固定种子 1，可手动修改。Apply 相同参数不随机换一份噪声，便于对比 SNR 扫点 |
+- **UI：** AWGN 页提供开关、参考方式、SNR 或噪声功率（支持 dBm 和 dBm/Hz 两种输入，按带宽换算）、噪声带宽。根据 level、信号 RMS 和查询结果显示派生值：噪声参考下显示各点的 SNR 范围，载波参考下显示噪声功率和总功率。I/Q 页提供 Invert、失衡和 Offset。输出补偿页（Level Offset、Flatness）独立于损伤页。
+- **换算：** Level Offset 同时作用于 level 和 noise_power；频偏使用 `fc + Δf`；采样率误差使用 `Fs·(1+ε)`，`m_sampleRate` 保持名义值。
+- **Apply：** FPGA 负责的损伤只是硬件配置，不重新生成或下载 IQ。生效时机以 API 合同为准，状态以查询结果为准。
+- **能力开放：** 只按 `channel_tx_query_impairment_capabilities` 的结果开放功能，不支持的模式明确提示原因。
+- **持久化、连接后恢复、SCPI、Minibar：** 共用同一个参数 owner 和校验规则。
+- **前端 IQ 层只保留 Channel Filter（P2）。** 如果 FPGA 不做 I/Q 损伤，再加入 Invert、失衡和 Offset。
+- **SCPI 逐点流程：** 在文档中给出情况 1、2 的逐点示例，说明每步的生效和等待条件。
 
-噪声带宽自动值：有明确生成带宽元数据时使用该值，例如 RRC 成形 QAM 用符号率与滚降系数得到的设计带宽；没有可靠元数据的 ARB，取当前可用噪声带宽上限，并显示“自动：按可用带宽”。多音跨度不足以唯一确定期望噪声带宽，默认同样按可用带宽，允许用户手动调整。不从 FFT 自动猜测协议或接收机带宽。
+## 七、FPGA 就绪之前的过渡
 
-对叠加器，采样率必须服从原波形，不随噪声带宽自动改变。上限按现有 0.8 Fs 裕量、设备带宽和滤波器可实现范围取交集。现有纯 AWGN 的“由带宽决定采样率”不适用于叠加器。带宽过窄使当前记录长度或滤波器无法满足定义时，提示具体约束；不能宣称任意正数都可生成。
+FPGA 接口就绪前，是否先做前端 IQ 层 AWGN 由产品排期决定：
 
-手动带宽越界时禁用 Apply，并提示“当前 Fs 20 MS/s，可用噪声总带宽上限为 16 MHz，请调整带宽或源波形采样率”。不静默钳位、不自动改变符号率。只有自动模式可以随源参数重新解析，解析值必须可见。后续设备/源变化同样重新校验。
+- 如果先做，只能支持载波参考，不能支持扫描时固定噪底，并且有噪声循环重复和需要重新下载的问题。实现可以参考旧版方案（git `ebfeeb2`）。
+- FPGA 就绪后删除 IQ 层 AWGN，不长期保留两套实现。只有当在售型号中确实存在不支持 FPGA AWGN 的设备时，才保留 IQ 实现，并由同一个 owner 按能力查询结果选择其中一种。
 
-#### SNR 的可复现定义
-
-设 s[n] 为完成 Invert 与 I/Q 失衡、但尚未叠加 AWGN 和最终 I/Q Offset 的信号。Ps 是最终播放记录上 mean(|s[n]|²)，包含用户所选区间中的静默和 period 补零；不能计算整文件平均后用于一个截取片段。
-
-Bn 内新增噪声功率 Pn 满足 Pn = Ps / 10^(SNR/10)。对生成噪声完成带限后再定标，不能先按未滤波白噪声功率设置比例。实际滤波器存在过渡带，应明确定标的积分带宽并验证带内结果；不能把全采样带宽噪声功率混称为 Bn 内功率。
-
-此 SNR 描述加噪步骤的输入信号与新增噪声，不等于 Eb/N0，也不等于接收机在其他测量带宽内得到的 SNR。I/Q 失衡本身的失真不被算成“新增 AWGN”；最终 Offset 和硬件本底也不属于该噪声功率。
-
-纯零记录无法定义按 SNR 的相对加噪，明确拒绝启用并提示选择非零信号；不能自动变成纯噪声源。ARB 中已有的噪声包含在输入记录功率中，软件不估算“原本干净的信号功率”。
-
-突发例子：10% 占空比的记录，全记录平均信号功率比开启段低 10 dB。全记录 SNR 20 dB 对应开启段 SNR 30 dB，前提是新增噪声在整个播放记录内连续存在。这个解释在帮助详情中常驻；首版不以非零阈值识别 burst。Playback 停止或外触发等待时不保证继续输出噪声，不能把记录内连续与设备持续发射混为一谈。
-
-#### Level 与功率显示
-
-保持已有 Level 和满幅 PEP 参考。最终量化 IQ 重新计算 peak/rms 指标，顶部 RMS 显示当前实际应用波形的总 RMS 估算；未应用的新值只出现在面板预览。
-
-AWGN 页补充“输入信号 RMS”“新增噪声带内 RMS”“损伤后总 RMS”，均标为估算、注明端口或补偿参考面。没有结果时显示“生成后显示”，不是 0。还需显示统一缩放造成的相对信号功率变化，避免 SNR 下调时用户误以为信号功率恒定。
-
-在没有 Offset、噪声带外能量可忽略、信号与噪声不相关的条件下，期望总功率比信号功率高 10log10(1+10^(-SNR/10))。例如 SNR 0 dB 时高约 3.01 dB。这是说明关系，不是把 Level 直接代入的通用算法；有限记录交叉项、滤波过渡带、DC 与归一化要求总 RMS 仍由最终样点计算。
-
-首版不增加“恒信号功率/恒总功率”双模式，不承诺改变 SNR 时信号 dBm 恒定。未来若要以恒信号电平做自动 BER 测试，应将其作为明确的功率控制能力，复用现有硬件 Level 能力与限幅检查。
-
-#### 循环噪声与导出
-
-Playback 中噪声每 Nlogical/Fs 秒重复（Nlogical 为加损伤的逻辑周期点数，见第二层的短记录重复规则），主页面直接显示“噪声重复周期”。不将固定 Playback 描述成无限不重复 AWGN，也不在后台默默扩展波形长度。用户需要更长统计记录时，主动增加 Digital 长度或选择更长 ARB；受到内存容量限制时明确提示。
-
-Save IQ 保留完整波形导出的既有语义，并提供“包含已应用的 IQ 损伤”选项，勾选状态清楚可见；有未应用草稿时提示“导出使用已应用设置”，不顺手提交草稿。硬件 Frequency/Level/Flatness 不烘焙进 IQ 文件。只生成并保存，不自动开启 RF/MOD。
-
-已导出的带损伤 IQ 再导入时视为普通输入记录，软件不能消除已有损伤；加载新文件时先关闭 AWGN 与 I/Q 注入并保留数值，避免二次叠加。完整导出与截断播放长度不一致时，各自按所处理记录定标，不能承诺二者逐样点相同或归一化增益相同。
-
-### 3.3 I/Q 与频偏交互
-
-幅度失衡 dB、相位失衡 °、I/Q Offset counts 默认 0；Invert 默认关。数值为 0 即无该项损伤，不再为每个数字字段配独立开关。页面帮助采用第一层的正号定义：正幅度失衡表示 I 增益相对 Q 更大，正相位失衡表示基向量夹角大于 90°；UI 与 SCPI 使用同一约定。
-
-I/Q Offset 表示最终 int16 样点的数字计数偏置，不宣称等于校准后的载波泄漏 dBc，也不照搬 VSG60 的硬件 counts 范围。采用“先为 Offset 预留余量，对信号+噪声统一缩放，再加 Offset，最后量化”的顺序。若偏置本身无合法余量，拒绝 Apply；不得默默削顶或者分别缩放信号与噪声破坏 SNR。
-
-Invert 使用复共轭 I+jQ → I−jQ，页面帮助写“镜像相对于 RF 中心的频谱”。默认不是 I/Q 交换，也不保证对对称频谱有可见变化。Frequency Offset 是名义中心频率到实际中心频率的偏移，不因 Invert 改变正负号。
-
-Frequency Offset 展示“名义中心”“偏移”“实际中心”三个量，例如 1 GHz + 10 kHz = 1.000010 GHz。该示例没有 provider 内部补偿；若存在还应参与硬件频率校验，详情区区分用户参考频率与设备调谐频率。实际频率超出设备范围时不应用。设置跟随通道而非 Digital 页面；进入扫描模式显示“不应用于扫描”，退出后按现有启动/应用流程恢复该通道设定。
-
-### 3.4 输出补偿交互
-
-Level Offset 默认 0 dB，正值表示增加仪器输出补偿链路损耗。例：名义 Level −30 dBm、Offset +3 dB，则硬件 Level 请求 −27 dBm；这仍是 Level 参考值，不等于任意 IQ 波形的平均功率。
-
-User Flatness 提供开关、表名/点数、编辑表格、CSV 导入导出与频率—补偿预览。表格至少验证数值有限、频率有效、严格递增且无重复；关闭时保留表。首版至少两个有效点才允许启用，表外外推规则见第一层。
-
-依当前需求中用户确认的 H2 行为，频点间线性插值、表外按相邻两点线性外推、叠加工厂校准。此语义不能从函数签名单独推出，应保留需求文档作为硬件行为依据。UI 明示“表外使用线性外推”，在当前输出频率越出表范围时显示边界提示，不能套用 VSG60 的端点保持。
-
-当前频点应使用实际 RF 频率（含固定频偏）计算展示值。扫描时检验相关频率/电平组合；若补偿后越过硬件能力则给出具体频点与超限量，不静默截断。SDK 已负责 Flatness 时软件只计算展示与校验，不再把同一表值手动加进下发 Level。
-
-“复位损伤”只把 AWGN 关闭、I/Q 失衡与 Offset 置 0、Invert 关闭、Frequency Offset 置 0，再等待 Apply；不清除 Level Offset、Flatness 或 LO Mode。输出补偿使用独立的复位与 Apply，减少日常测试误清校准的风险。
-
-### 3.5 编辑与生效流程
-
-新增损伤有编辑草稿和已提交配置，复用现有生成任务/设备 applied 状态，不增加一套 UI 自认成功的状态机。AWGN 与 I/Q/频偏两个页签共用一次损伤 Apply；输出补偿独立 Apply，按钮明确写“应用损伤”或“应用补偿”。
-
-1. 编辑只修改草稿，显示“待应用”；旧输出保持原设置。Apply 提交本次完整参数快照。
-2. 先校验，再后台处理；显示“处理波形”与“下载波形”的真实阶段，无法得到百分比时使用不定进度。
-3. 仅改频偏或输出补偿不重新生成 IQ；使用相应硬件配置进度。需要替换波形且当前输出使能时，按钮写“应用并更新输出”，旁边说明“重新下载期间输出可能中断”。点击本身就是用户明确动作，不每次再弹确认。
-4. 未使能时按钮写“应用设置”，不打开 RF/MOD；可形成待启动的已生成结果，但状态只能写“已准备，尚未输出”。
-5. 设备完成配置/下载后才显示“已应用”；外触发尚未到达则显示“已装载，等待触发”。不能把请求接受或生成完成当成正在输出。
-6. 准备阶段失败且未触动设备，保持旧输出并报告失败。若已经停流、改频或覆盖设备内存，则显示实际停止/失败状态；不承诺自动回滚至已经被覆盖的旧波形。
-
-离开面板不偷偷应用或丢弃草稿，入口保留“待应用”标记；“撤销修改”恢复到已提交参数。常规源波形编辑仍按原机制自动生成，并使用最后已提交的损伤配置，不能把草稿夹带下发。
-
-AWGN 和 I/Q 参数按当前业务保留，切换到另一业务不自动复制开启状态；首次进入均关闭。同一业务换 ARB 文件时关闭 IQ 注入并保留数值。频偏与输出补偿按当前通道保留。切到不支持的模式时明确“本模式不应用 IQ 损伤”，不能显示旧源的 AWGN 已开启；回到支持源时展示该源保留的设置，由正常启用流程应用。
-
-## P0 验收与交付顺序
+## 八、验收要点
 
 | 场景 | 应有结果 |
 | --- | --- |
-| 16QAM 加噪，SNR 30→20→10 dB | 按定义积分带宽验证数字新增噪声与信号比；RF 测量注明接收带宽与硬件本底 |
-| SNR 0 dB，其他损伤为零 | 定标后的带内新增噪声功率与输入信号功率相同；不把 Level 当作总 RMS |
-| 同一参数、同一种子再次 Apply | 数字记录可复现，不暗中更换噪声 |
-| Bn 超限或源采样率降低 | 自动模式显式更新，手动模式报字段错误，禁止静默改源采样率 |
-| 含空闲段 ARB 与全零 ARB | 前者按完整播放记录平均；后者拒绝 SNR 加噪 |
-| AM/FM/PM、DSSS/OFDM、Ramp、Pulse 接入同一 IQ 链 | 共用算法，无按名称的额外禁用；Pulse 验证全周期 SNR 和关断段噪声/DC |
-| 仅改变 Level Offset 或 Frequency Offset | 名义值不累计漂移，保留 provider 补偿，复用驻留 IQ，不触发 DSP |
-| 所有 IQ 损伤关闭 | 样点与原链一致，原 IQScale/AutoScale 和功率参考不变 |
-| I/Q Offset 与低 SNR 同时使用 | 统一缩放预留余量，最终不削顶，counts 与统计解释一致 |
-| 输出中编辑、Apply、失败、外触发 | 待应用/处理中/已装载/输出状态可区分，不误报成功 |
-| Digital→纯 AWGN/CW/Streaming | IQ 损伤显示不适用；输出补偿仍按自身能力生效 |
-| ARB 换文件、完整导出再导入 | 清楚显示是否包含 IQ 损伤，不自动进行二次注入 |
-| 补偿曲线外频点、扫描电平超限 | 明示外推，校验正确参考面，不静默截断或重复补偿 |
-| 1024×600、软键盘、长单位文本 | 核心参数与 Apply 一屏可操作，主要字号不缩小，弹层返回正确 |
-
-建议交付顺序：先完成硬件补偿/频偏及回写；再完成共用 I/Q 失衡、Offset 和 payload 接入；集中实现 AWGN；先用 Digital/普通 ARB/Multitone 验证三种来源，再将同类离线 Baseband 接入验收后开放。开发顺序不意味着降低 AWGN 的产品优先级。此前交互草案仅用于分组参考，最终支持范围与 P0 边界以本文为准。
+| 载波参考，SNR 30 → 20 → 10 dB | 带宽内噪声/信号功率比符合设定；修改不需要重新下载 |
+| 开关 AWGN，level 不变 | 信号功率不变，总功率增加 `10·log10(1 + 10^(−SNR/10))` |
+| 噪声参考 + LScan | 各点噪声功率在规定误差内保持不变，信号按 level 变化 |
+| 噪声参考 + MScan（频率和电平都变，Flatness 开启） | 各频点噪声功率在同一参考面上保持不变 |
+| 某扫描点超出可达 SNR | 配置时返回明确告警，UI 显示具体的点 |
+| Playback 长时间输出 | 噪声不随波形周期重复 |
+| CW + AWGN、Streaming + AWGN | 按能力查询结果可用 |
+| I/Q 失衡 + Invert | 镜像位置和正负号约定与文档一致 |
+| 开启 AWGN 时接近最大电平 | 返回 UNLEVEL，不静默降电平 |
+| 设备重连、preset | 前端恢复已保存的设置，UI 与查询结果一致 |
 
 ## 相关依据
 
 - [信号损伤需求](信号损伤功能需求文档.md)
-- [Digital 当前交互](digital_modulation_user_interaction_flow.md)
-- [现有波形带宽与采样率约束](Waveform_Parameters_Constraints.md)
 - [PEP 与 RMS 原理](htra_rms_power_multitone_pulse_principle.md)
-- [TX 请求与执行架构](tx_execution_context_phase1_and_provider_migration.md)
-- [大波形内存与下载](large_waveform_streaming_plan.md)
 - [固定 Playback 的 Center/Level 配置链](CenterLevel配置链路重构设计.md)
-- [ARB 模式与分段边界](arb_mode_summary.md)
-- [5 寸 Home/Main 设计](5寸屏幕的Home Main 交互设计.md)
-- [任务计划与静态核对记录](../TaskLog/2026-10-10_signal-impairments-p0-ui-design.md)
+- [大波形内存与下载](large_waveform_streaming_plan.md)
+- [本次任务记录](../TaskLog/2026-10-20_signal-impairments-fpga-plan.md)
+- [上一版任务记录](../TaskLog/2026-10-10_signal-impairments-p0-ui-design.md)
 
-静态代码依据：已由 CMake 纳入的 HTRA 本地生成器、arbdatagenerator、generatedplaybackutils、Analog digital/dsss/ofdm modulator，以及 Core playbackpayload、iplaybackbusiness、txsessionservice、txpipelineexecutor 和 HTRA fancydevice。H2 API 以当前 h2_api.h 为准。本方案不代表这些新交互已在产品中运行验证。
+代码依据：HTRA `fancydevice.cpp` 中的 `startListSweepLocked`、`configurePlaybackStreamLocked` 和 `configureRealtimeStreamLocked`，以及当前 `3rdParty/h2_api/include/h2_api.h`（api 39，没有 AWGN 或 I/Q 损伤接口）。本文中的新接口都是需求草案，尚未实现。

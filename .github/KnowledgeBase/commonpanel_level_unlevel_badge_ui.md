@@ -54,6 +54,8 @@
 
 `UNLEVEL` 现在是 `Level` 按钮的局部 badge 状态，不是状态栏 warning。
 
+刷新入口：`MainWindow` 在 `CommonDeviceProfile::deviceConfigurationDone`（errorStr 为空）时读取 `txLevelUnlevelActive()`。Runtime 托管管线经 `TxSessionService::deviceConfigurationDone` 转发到该信号；Streaming 等 legacy business 经 `IBusiness::deviceConfigurationEnd` 发出该信号，因此两条路径都会刷新。
+
 ## 5. Instrument 模式例外
 
 `ui-mode=instrument` 使用 1024x600 固定布局，Level 按钮采用独立的紧凑显示：

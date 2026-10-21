@@ -216,6 +216,15 @@ Analog 插件当前已经明确把两阶段拆成两种语义：
 - 如果当前设备已 open，则这条链路会立即尝试重新下发设备配置。
 - 如果当前设备尚未 open，则会先恢复 UI/业务状态；等设备后续 open 时，`BusinessManager` 仍会根据 `currentDeviceOpenStateChanged(true)` 再触发当前激活业务执行配置。
 
+### 7.2 MScan / Last State 启动恢复（2026-10-21）
+
+- `restoreRuntimeProfile()` 先恢复 List 表，再恢复 sweep enabled。`ListModePanel::onProfileChanged()` 必须在返回前同步调用 `publishDraftToService()`，保证立即使能读取到恢复后的 Draft；交互编辑仍沿用原有合并发布。
+- 设备能力尚不可用时，MainWindow 保留 MScan 开关及 `TxSessionService::carrierPlan()` 的 ON 意图，不立即提交点表。无需单独 pending 标志；OFF、Preset 或后续配置选择会直接覆盖唯一的载波意图。
+- `TxSessionService::processPendingRefresh()` 通过原有 capability-ready / updates-suspended 门控后，在构造流水线快照前检查 MScan Submitted。仅当 Submitted 缺失或绑定的设备 UID / capability revision 过期时，调用原 `prepareSubmittedSnapshot()` 校验并重建；失败记录原错误、选择 Fixed，并通过既有信号将 UI 回写 OFF。
+- 已绑定当前设备的有效 Submitted 不因普通 refresh 自动提交更新的 Draft，保持编辑与 Apply 的边界。
+- 补提交放在消费刷新时，兼容设备切换中“先 open，再恢复目标 profile，最后解除挂起”的顺序；沿用原刷新调度，不增加延时或重试。
+- 用户已完成一次 Last State + Digital Playback + MScan 冷启动验收：日志显示恢复 200 点时能力不可用，设备连接后补提交，RF/MOD ON、Carrier:MScan，实际配置与回读均为 200 点，执行完成 `success=yes accepted=yes`。本轮临时 `[MScanRestore]` 跟踪日志已移除，提交失败保留常规原因诊断；其他场景仍只有静态核对。见 [修复 TaskLog](../TaskLog/2026-10-21_fix-mscan-last-state-restore.md)。
+
 ---
 
 ## 8. 重要问题：设备切换时会“配置两次”
