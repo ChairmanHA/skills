@@ -1,6 +1,6 @@
-# SMA100B 风格的 Instrument Home 与配置导航
+﻿# SMA100B 风格的 Instrument Home 与配置导航
 
-日期：2026-10-14
+日期：2026-10-15
 状态：已按确认方案接入；Home Sweep 已移除交互使能按钮，标题以 30 px 显示 ON/OFF，摘要提示 MScan 无数据/未 Apply 并显示加载文件路径；System 摘要为四行两列，进入 System 后为六类入口、分类页面与 Tab。最新改动仅静态检查，未编译或运行；此前 Core 插件 Debug 构建属于历史验证。128 px 顶行、Waveform、左 System/右 Sweep 及右侧 Back 保持现有布局，尚未真机验收。
 适用：5 寸 1024×600、`--ui-mode=instrument`。本文 Main 指 Waveform 参数工作页，桌面 `--ui-mode=main` 不在本轮范围内。
 
@@ -32,8 +32,8 @@
 ├────────────────────────────────────────────────────────────────────────────────────────────┤
 │ Waveform 配置                                                                          >   │
 │ 当前调制：多音                                                                             │
-│ 音调数量：5       频率间隔：1.000 MHz       音调相位：Random                               │
-│ 随机种子：1                                                                                │
+│ 音调数量：100     生效音数：98/100         频率间隔：1.000 MHz                              │
+│ 音调相位：Random  随机种子：1                                                              │
 │                                                                                            │
 │ 点击此区域 → Main：左侧现有 Panel，右侧单列类型列表                                        │
 ├────────────────────────────────────────────────────────────────────────────────────────────┤
@@ -54,11 +54,13 @@ Freq 与 Level 都是可编辑控件，点击沿用现有数值输入；标题�
 
 **第二行：整宽 Waveform 配置摘要。**
 
-MOD ON 时显示已启用基带的类型、原参数与 [ON]；MOD OFF 时显示用户当前选择的基带参数与 [OFF]。例如已启用多音 A、正在编辑数字调制 B：MOD ON 时摘要继续显示 A，关闭 MOD 后显示 B。状态表示调制使能，不等同于 RF 正在输出。
+Home 始终显示当前选择 Waveform 的类型、原参数与 [ON]/[OFF]。MOD ON 时真正返回 Home 前，将工作页及列表当前项恢复到已使能 Waveform；MOD OFF 时保留用户当前选择。例如已启用多音 A、正在浏览数字调制 B：返回 Home 后当前选择恢复为 A，随后关闭首页 MOD 仍显示 A 的参数和 [OFF]，再次开启仍控制 A。用户在 MOD OFF 时选择 B 并返回 Home，则显示 B 的参数和 [OFF]。状态表示调制使能，不等同于 RF 正在输出。
 
-多音沿用音调数量、间隔、相位模式，Random 时补充随机种子；数字调制与回放沿用各自已有字段，不套用多音格式。数值和枚举显示由原 Panel 负责，概要不保存第二套配置。
+多音沿用音调数量、间隔、相位模式，Random 时补充随机种子，并追加“生效音数：98/100”这样的当前频表统计。分子为已开启音数，分母为总音数；全关仍显示 `0/100`，不等待生成完成或 RF 开启。数字调制与回放沿用各自已有字段，不套用多音格式。数值、枚举和补充统计由原 Panel 负责，概要不保存第二套配置；新增 Enabled Tones 翻译键暂不写入 Excel。
 
-参数摘要采用四列等宽、最多三行（最多 12 项），每格单行，保持 24 px 字号；字段过长时中间省略，整卡 tooltip 保留全部可见字段原文。字段顺序与可见性继续由原 Panel 的 LabelButton/EnumTextButton 决定，少于 12 项时空格清空，尺寸/字体变化后重算省略。13 类 Waveform 的逐行字段与动态条件见 [设计原则与交互说明的字段表](instrument_ui_mode_design_principles_and_interaction.md#321-各类-baseband--waveform-的实际摘要字段)。
+Playback 共十项，按关联属性分三行：第一行文件名、采样率、文件点数；第二行使用点数、点偏移、使用时长（原 Signal Length）；第三行周期点数、周期时长、Auto Scale ON/OFF、I/Q Scale。前两行第四列留空，用户明确不要新增文件时长，不把使用时长当成文件总时长。Auto Scale 状态来自原面板的实际开关，用户切换、属性回写及文件模式锁定后更新；IQS-WAV 强制 Auto Scale 时显示 ON。I/Q Scale 的原显示与可编辑性保持既有逻辑，Auto Scale ON 时该手动缩放值不作为输出依据。
+
+参数摘要采用四列等宽、最多三行（12 个位置），列间隙从 8 px 缩为 2 px，其余列宽用于显示；每格单行，保持 24 px 字号。各 Panel 按关联属性明确每行顺序，一行少于四项可以留空，下一组从下一行开始；隐藏字段也保留原位置。格式化继续读取原 LabelButton/EnumTextButton 标题和值，统计及开关状态由原 Panel 填入。字段过长时中间省略，tooltip 保留全部非空字段原文，不保留布局空行。切换时空格清空，尺寸/字体变化后重算省略。13 类 Waveform 的逐行字段与动态条件见 [设计原则与交互说明的字段表](instrument_ui_mode_design_principles_and_interaction.md#321-各类-baseband--waveform-的实际摘要字段)。
 
 点击区域进入 Main，打开概要中同一个 Waveform 的现有 Panel；外部 MOD 也控制这个目标。面板内部的 Auto Mod 联动和偏好保留，外部 MOD 作为显式命令不依赖 Auto Mod 偏好。此行不另设重复开关。
 
@@ -116,36 +118,33 @@ Home 中的 System 卡片显示四行两列的八项当前配置与读数，按�
 
 Main 右侧保留单列业务类型列表，上下箭头滚动，条目高亮表示当前选择；条目来源、许可与设备可用性沿用现有业务列表。下图仅示意部分条目，不重新规定注册次序。
 
-左侧直接复用当前 MultitonePanel。这里画 Random 模式，沿用其实际参数顺序；不存在额外的“多音参数 / 当前 BaseBand”公共标题栏。
+Instrument 多音页使用独立的三列两行布局，不沿用桌面 Panel 的两列排法；继续使用原参数控件、绑定和频表逻辑。这里画 Random 模式，不存在额外的“多音参数 / 当前 BaseBand”公共标题栏。
 
 ```text
-┌────────────────────────────────────────────────────────────────────────────────────────────┐
-│ Enabled                              │ Tone Phase                           │ [ Back ]     │
-│          [ 开 | 关 ]                 │          Random ▾                    │      ↑       │
-│──────────────────────────────────────┼──────────────────────────────────────│ [多音]       │
-│ Phase Random Seed                    │ Freq Spacing                         │  数字调制    │
-│          1                           │          1.000 MHz                   │  AM          │
-│──────────────────────────────────────┼──────────────────────────────────────│  FM          │
-│ Tone Count                           │                                      │  脉冲        │
-│          5                           │                                      │  斜波扫描    │
-│─────────────────────────────────────────────────────────────────────────────│  …           │
-│ Tone Num       FrequencyOffset                     Enabled                  │              │
-│     1             -2.000 MHz                         [x]                    │              │
-│     2             -1.000 MHz                         [x]                    │              │
-│     3              0 Hz                              [x]                    │              │
-│     4              1.000 MHz                         [x]                    │              │
-│     5              2.000 MHz                         [x]                    │              │
-│                                  …（表格 / Panel 可滚动）                   │              │
-│─────────────────────────────────────────────────────────────────────────────│      ↓       │
-│          [ Save IQ Data ]            │                                      │              │
-└────────────────────────────────────────────────────────────────────────────────────────────┘
+┌─────────────────────────┬─────────────────────────┬─────────────────────────┬──────────────┐
+│ Enabled                 │ Tone Count              │ Freq Spacing            │ [ Back ]     │
+│ [ ON / OFF ]            │ 5                       │ 1.000 MHz               │      ↑       │
+├─────────────────────────┼─────────────────────────┼─────────────────────────┤ [多音]       │
+│ Tone Phase              │ Phase Random Seed       │                         │ 数字调制     │
+│ Random                  │ 1                       │ [ Save IQ Data ]        │ AM / FM      │
+├─────────────────────────┴─────────────────────────┴─────────────────────────┤ 脉冲         │
+│ Tone Num                 FrequencyOffset                         Enabled   │ 斜波扫描     │
+│ 1                        -2.000 MHz                              [x]       │ …            │
+│ 2                        -1.000 MHz                              [x]       │              │
+│ 3                         0 Hz                                   [x]       │              │
+│ 4                         1.000 MHz                              [x]       │              │
+│ 5                         2.000 MHz                              [x]       │              │
+│ …（原频表占据下方所有剩余高度，表内继续滚动）                                │      ↓       │
+└───────────────────────────────────────────────────────────────────────────┴──────────────┘
 ```
 
 - 右侧列表约 132 px，列表与左侧参数区间距 8 px；左侧约 860 px。列表固定单列，不因空间改变而换成两列；上下箭头只滚动类型列表。
 - Back 按钮放在右侧列表的上方，不占左侧 Panel 的行高。点击类型条目切换已有 Panel，保留其原参数绑定、动态可见性和业务选择行为。
-- 多音 Random 模式：第一行 Enabled/Tone Phase；第二行 Seed/Freq Spacing；第三行 Count/空位；随后是跨两列的三列音调表和左下 Save IQ Data。
-- Fixed/Parabolic 模式继续隐藏 Seed，Count 上移，与 Freq Spacing 同行。Notch Width、Discrete Tone Mode、Show Waveform 沿用当前隐藏状态；不添加 AutoScale 或“生成波形”按钮。
+- 多音所有相位模式都固定两行参数：第一行 Enabled/Tone Count/Freq Spacing；Random 第二行 Tone Phase/Seed/Save IQ Data。表格固定第三行跨三列并伸展，不再保留底部保存按钮行。
+- Fixed/Parabolic 继续隐藏 Seed，Save IQ Data 前移到第二行中列，只占一列并与其它按钮同宽，最后一列留空；切换相位不会压缩表格高度。Notch Width、Discrete Tone Mode、Show Waveform 沿用当前隐藏状态；不添加 AutoScale 或“生成波形”按钮。
+- Instrument 频表表头从 18 px 增至 22 px，逐音 Enabled 的深浅主题 SVG checkbox 从 24 px 增至 30 px；行高保持 45 px，整格点击及多选使能规则不变。普通 main 保持原布局、18 px 表头和 24 px checkbox。
 - 左侧参数按钮继续采用大控件尺度，纵向空间不足允许滚动；右侧 Back 与类型列表独立于参数区滚动。
+- Streaming 文件列表按完整内容展开，与参数共用外层页面滚动条；Instrument 下关闭列表内层纵横滚动，使用 AdjustToContents 和纵向 Minimum 尺寸策略，文件增删/清空/恢复后沿用 Qt 的尺寸更新。普通 main 保留原表内滚动，原文件选择和拖动排序逻辑不改。见 [本轮实施记录](../TaskLog/2026-10-15_streaming-single-scroll.md)，仅静态核对。
 - 二级配置页优先给配置内容留空间，不重复首页 128 px 高的大 CommonPanel 行；需要调整 Freq/Level 或 RF/MOD 时点 Back，首页即达。
 - 进入 Sweep 或 System 是导航，不将 Waveform 类型改为 Sweep/System；返回后仍看到原 Waveform 配置与类型。现有列表中若保留 Sweep 入口，它应进入同一份 Sweep 配置内容，不能产生第二套扫描参数。
 
@@ -251,7 +250,7 @@ GPIO、GNSS、SCPI、升级、关于、文件选择和亮度输入保留原功�
 - MainWindow 的 Instrument 根栈依次承载 Home 总览、Main、Sweep、System，启动配置加载后停在总览。Main 右列固定 Back 加同一份业务列表，左侧仍由 FancyTabWidget 承载原 Panel；独立 Sweep 页直接承载唯一 StepSweepPanel，System 由原设置 Home 代码改为 InstrumentSystemWidget。
 - System 内部栈承载分类概览与分类内容，共用一条标题/Back；设备和偏好只调整 Instrument 呈现，main 保留原布局。详细归属与静态边界见 [System 分类页面文档](instrument_system_category_dialog_design.md)；新增翻译键尚未补 Excel。
 - 桌面 main 仍将 Sweep/General Settings 注册到 FancyTabWidget 的 standalone 页面，CommonPanel 与右侧 dock 布局和原响应式判定保留。新 Instrument 列表分支固定单列 132 px，条目 130×100 px，上下按钮各 40 px，滚动条隐藏但箭头和触摸仍滚动原列表。
-- Home 的 waveformBusiness() 统一概要、编辑跳转与 MOD 目标：ON 取 selectedBusiness，OFF 取 currentBusiness。概要读取目标 Panel 中可见 LabelButton/EnumTextButton 的原标题与格式化显示值，用四列三行 QLabel 网格展示前 12 项，完整字段放在整卡 tooltip，标题注明 ON/OFF。网格单元格长文本中间省略，空格清空；不再拼空格形成参数列。直接订阅 labelTextChanged、Panel 使能、Mod 和选择变化，保留布局/显隐/单元格尺寸字体通知与合并刷新，回 Home 立即同步；不复制 profile、枚举或单位规则。详情见 [MOD / Waveform 联动](auto_mod_user_intent_boundary.md#9-instrument-外部-mod-请求与-home-概要)。
+- MainWindow 的 setInstrumentHomePage() 统一启动恢复与真正 Back 完成后的 Home 进入：MOD ON 先把浏览页/列表当前项对齐到已使能业务，MOD OFF 保留当前选择；弹窗及 System 分层返回在对齐前处理。Home 概要、外部 MOD 与可用性统一读取 currentBusiness，点击概要直接进入当前工作页；移除 waveformBusiness() 双目标解析与重复定位。概要读取目标 Panel 的 summaryParameters()，各 Panel 按关联属性明确字段及留空位置，共同格式化方法只读取原控件标题和值，用列间距 2 px 的四列三行 QLabel 网格展示前 12 个位置；完整非空字段放在整卡 tooltip，标题注明 ON/OFF。多音生效音数从原频表候选快照统计，Playback Auto Scale 取原开关生效状态，不新增 main 控件或文件时长。网格单元格长文本中间省略，组间空格保留并清空。直接订阅 labelTextChanged、Panel summaryChanged/使能、Mod 和选择变化；Mod/使能业务变化只刷新状态，浏览对象变化才重绑 Panel 并断开旧 Panel 通知，保留布局/显隐/单元格尺寸字体通知与合并刷新，回 Home 立即同步；不复制 profile、枚举或单位规则。详情见 [MOD / Waveform 联动](auto_mod_user_intent_boundary.md#9-instrument-外部-mod-请求与-home-概要)。
 - System 摘要读取 RefClockSource/TriggerSource/TriggerAction/LoMode/RfPort 的值与原 enumDisplayOptions 名称、CommonDeviceProfile::refClockFrequency() 的有效频率与 systemClockOut() 的参考输出镜像；这是与设置页相同的当前配置镜像，设备成功配置及参考时钟查询回写后同步，不增加独立硬件查询。温度从 DeviceRuntimeBridge 已过滤当前设备并负责断开清空的 DeviceRealTimeStatus property 获取，沿用 InvalidDeviceTemperature 哨兵判定。Home 不保存另一套配置或温度缓存；订阅原 property 的 valueChanged 和枚举选项动态属性事件，复用现有合并刷新与 showEvent；单元格 resize/font change 后重算省略显示。
 - Sweep 频率/功率摘要读取原 getProfile()；MScan 读取 MScanTableService 快照，previewSubmittedSnapshot() 与原 prepareSubmittedSnapshot() 共用提交校验及点表构造，概要预览不生成提交 token 或发出服务状态通知。标题状态取自原开关，Home 只导航、不使能。文件路径由 ListModePanel 的加载状态拥有，loadedFileChanged 经 StepSweepPanel::stateChanged 通知概要；save 使用显式导出路径，避免修改加载来源。Sweep 卡片可用性仍由 MainWindow 的原统一规则裁决。
 - 仅读取已有基带参数，不额外绑数值键盘。Freq/Level 原绑定继续由唯一 CommonPanel 负责；Level 的 PEP 大数值与辅助 RMS 共用已有功率单位换算。新尺寸和字体只匹配 Instrument 总览/工作页/System 对象，键盘自身规则保留。
@@ -261,6 +260,7 @@ GPIO、GNSS、SCPI、升级、关于、文件选择和亮度输入保留原功�
 
 - Core CMake 纳入 commonpanel、instrumenthomewidget、devicesettingdialog、stepsweeppanel、listmodepanel；HTRA CMake 纳入 multitonepanel.cpp/.ui。
 - 已核对多音 UI 与 updateSeedDependentRows() 的动态行布局，以及 StepSweepPanel 的三种扫描页面、Enabled 状态入口和现有设置 Home 的布局。
+- 多音在首次归属 Instrument 页面并显示时，仅释放旧布局 item/布局，重新建立三列网格；原控件继续由 Panel 拥有并保留绑定。Seed 可见性变化只重新安放 Seed/Save，主题切换继续刷新局部频表样式。见 [两行布局实施记录](../TaskLog/2026-10-15_instrument-multitone-two-row-layout.md)，本轮仅静态核对，未编译/运行。
 - Home 尺寸预算为 1024×600；二级页内容允许滚动。实际字号、译文、触摸尺寸与平台显示尚未验收。
 
 Home Sweep 只读状态和文件路径见 [本轮 TaskLog](../TaskLog/2026-10-13_home-sweep-status-and-file-summary.md)，仅静态检查。旧方形开关的 [卡片内修正](../TaskLog/2026-10-12_restore-sweep-toggle-inside-card.md) 和 [尺寸调整](../TaskLog/2026-10-12_enlarge-home-sweep-toggle.md) 保留为历史，本轮已移除。System 四行两列与字符串编译修复见 [对应 TaskLog](../TaskLog/2026-10-12_fix-system-summary-encoding-and-grid.md)。首次配置与温度摘要见 [实时摘要 TaskLog](../TaskLog/2026-10-12_instrument-system-live-summary.md)。此前细调见 [Waveform/右侧 Back TaskLog](../TaskLog/2026-10-12_refine-instrument-waveform-and-back-layout.md)。实施记录见 [SMA 风格 Instrument Home TaskLog](../TaskLog/2026-10-12_implement-sma-instrument-home.md)。此前 Core Debug 构建已通过；实际布局、触摸、深浅主题、翻译和 Wayland 的运行验收仍待进行。

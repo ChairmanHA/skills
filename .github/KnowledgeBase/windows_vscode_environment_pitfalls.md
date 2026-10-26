@@ -1,9 +1,10 @@
 # Windows / VS Code 环境坑记录
 
-本文记录两个已经在当前仓库实际出现过、但本质上不属于业务代码缺陷的环境问题：
+本文记录当前仓库实际出现过的工具环境问题：
 
 - Windows 构建输出中的 `pwsh.exe` 提示
 - VS Code 中 Qt includePath / IntelliSense 缺失
+- WindowsApps 的 Python 占位命令、项目虚拟环境与测试脚本路径
 
 这两个问题都容易干扰判断：
 
@@ -143,6 +144,25 @@
 - VS Code 中 Qt 头文件一片红，不等于 CMake 工程真的有编译错误。
 - 先信真实构建结果，再信 IntelliSense。
 - 只有当它明显影响开发效率时，才值得把它升级写进 instructions；否则更适合留在 KnowledgeBase 里当环境坑说明。
+
+## 3. Python 命中 WindowsApps 占位程序，脚本路径重复
+
+2026-10-23 现场：用户在 `D:/development/vsg2.0/scripts` 执行 `python scripts/test_scpi_gui_baseline.py` 后直接回到提示符。`Get-Command python -All` / `where.exe python` 只找到 WindowsApps/python.exe，占位文件大小为 0；实际已有 uv 管理的用户级 Python，但没有默认 python 命令。当前目录又使脚本路径多出一层 scripts，两个问题叠加掩盖了正常的 Python 文件不存在提示。
+
+本机已通过 `uv python install --offline --default 3.12` 注册用户级 Python 3.12.13。解释器位于用户 AppData/Roaming/uv/python，默认命令位于 `.local/bin`，该目录已在永久用户 PATH 中并先于 WindowsApps；不依赖 Codex 缓存或临时会话变量。新 PowerShell/CMD 的 python --version 均已验证。
+
+项目独立环境使用 `python -m venv .venv`；以 `.venv/Scripts/python.exe` 直接启动脚本，不依赖激活和 ExecutionPolicy。当前脚本仅需标准库，无须额外 pip 安装，.venv 和字节码由 Git 忽略。
+
+PowerShell 从仓库根运行：
+
+```powershell
+Set-Location 'D:\development\vsg2.0'
+.\.venv\Scripts\python.exe .\scripts\test_scpi_gui_baseline.py --runtime-dir .\build\Qt_5_15_9_msvc2022_64-Debug
+```
+
+CMD 使用 `cd /d D:\development\vsg2.0` 后运行同一解释器和参数。若已处于 scripts 目录，解释器路径改为 `..\.venv\Scripts\python.exe`，脚本路径用 `.\test_scpi_gui_baseline.py`。runtime-dir 应对应当前 SGStudio 的 bin 上一级，而非固定取仓库根。
+
+本次还实测发现 SCPI 拒绝中文命令路径（-101），因此 9 份原 JSON 原样复制到 Debug runtime/testcases，通过 ASCII 相对路径加载；JSON 内部中文波形路径不变。详细准备、结果和截图见 scripts/README_scpi_gui_baseline.md 与 TaskLog/2026-10-23_fix-python-baseline-launch-environment.md。
 
 ## 相关文件
 

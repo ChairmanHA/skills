@@ -1,6 +1,38 @@
 # SCPI 接入静态审阅与当前收口方案
 
 日期：2026-09-17
+
+## 2026-10-23：内部基线自动化入口
+
+新增以下两个内部命令，不增加 GUI 菜单，也不扩展 `*OPC?` / `*WAI` 或执行完成状态。已在用户启动的 Debug 程序上运行基础脚本；UI/射频复核及下述参数差异仍待确认，本轮未构建程序。
+
+| 命令 | 参数/响应 | 行为 |
+| --- | --- | --- |
+| `SYSTem:TEST:LOAD "testcases/M-1.json"`（短写 `SYST:TEST:LOAD`） | 路径字符串；设置成功无响应 | 复用 File/Open 的配置恢复、批量 pipeline 挂起、pending MOD 恢复及业务重新选择；可在未连接设备时恢复配置。成功仅表示配置读取/恢复并已请求执行，不代表波形生成、下载或设备配置结束。 |
+| `HCOPy:DATA?`（短写 `HCOP:DATA?`） | 本机 PNG 文件的绝对路径字符串 | 捕获主窗口并直接保存到 `<runtime>/images/`；成功返回带外层双引号的路径，失败返回 `""` 并入错误队列；不弹出截图保存提示。 |
+
+路径由运行 SGStudio 的机器解析：相对路径固定以可执行文件目录的上一级为基准，即包含 `bin/`、`plugin/`、`configuration/` 的运行根目录，不跟随客户端或 SGStudio 的 cwd。绝对路径直接使用。例如可执行文件在 `<runtime>/bin/` 时，上述命令读取 `<runtime>/testcases/M-1.json`。
+
+命令中的路径字符串必须为 ASCII。2026-10-23 实测直接发送桌面中文目录产生 -101 Invalid character，改为 `<runtime>/testcases` 下的同一 JSON 后加载正常。因此使用 ASCII 相对路径，脚本在连接前拒绝非 ASCII 路径；不修改 parser 来扩展协议。JSON 内的中文 WAV 路径仍由配置加载实现直接读取，不受命令文本这一限制。
+
+配置中的 WAV/IQS-WAV 路径保持既有保存与解析语义；本接口不重写波形路径、不上传波形、不自动选择其他设备。测试者须保证目标机器可访问这些文件。有效 JSON 对象仍按现有默认值合并规则恢复，不能把 `{}` 当成格式损坏样本。
+
+错误沿现有 SCPI 错误队列上报：空白路径为 `-224`；无 MainWindow 为 `-241`；文件读取/JSON 对象解析/恢复失败或截图捕获、目录创建、PNG 保存失败为 `-200`。可用 `*ERR?` 读取错误码；普通加载失败在恢复前返回，不把读取失败当作加载成功。原 `*ERR?` 的通用错误文字格式保持不变。截图失败仍有空字符串响应，客户端不必等待无响应超时。
+
+脚本按用户最新确认的简版流程执行：发送 LOAD 或设置命令 → 客户端等待 **100 ms** → 查询参数、RF/MOD/Sweep 及 `*ERR?` → 请求截图。大 WAV/IQS-WAV 可显式延长单组场景的客户端等待；服务器不添加 sleep、重试或完成状态轮询，`*OPC?` 当前仍固定返回 1。
+
+2026-10-23 按用户本机运行脚本和程序的部署方式，取消最初的 PNG 二进制响应，保留命令名并直接在服务器保存。例：`HCOP:DATA?` → `"D:/development/vsg2.0/images/20261023_153012_123.png"`。文件名采用 `yyyyMMdd_HHmmss_zzz.png`，适配 100 ms 检查点。仅用控制连接读取一行路径，无须 5125 数据通道或二进制块读取。`images/` 与配置的相对路径使用同一运行根目录锚点，不依赖 cwd。
+
+截图范围为当前 MainWindow 的 QWidget 图像，包含其子控件；独立顶层 GNSS/设置弹窗、系统桌面和硬件屏幕亮度不属于这次截图接口范围。截图在 GUI 线程同步捕获，不修改当前业务/页面，不承担设备完成或 UI 稳定等待。
+
+实现入口：`src/plugins/scpi/register/scpiregister.cpp`、Core 的 `MainWindow::loadSettingsFile()` / `saveWindowScreenshot()` 和原 `MainWindowSettingsController::loadSettingsFile()`。Core 统一负责捕获、目录创建和 PNG 保存；手动按钮保存后显示提示，SCPI 只返回路径，不另建发射或恢复链路。
+
+精简脚本：`D:/development/vsg2.0/scripts/test_scpi_gui_baseline.py`，使用说明见同目录 `README_scpi_gui_baseline.md`。默认 basic/scans/files/repeat，含 MScan、Playback、Streaming；external 按接线单独选择，用户已注释掉选件场景入口，保持该修改。加载期望取自用户当前 JSON，不改原 Excel/JSON/WAV；图片和逐点报告位于 images/。本机 Python 3.12.13/.venv 已配置，四组基础场景共 59 点，51 PASS/8 FAIL，59 张截图均存在，最终 RF/MOD/Sweep OFF。差异集中在 MScan 全局驻留读回以及 Streaming 切换后的 Center/Level；未将这些失败改成通过或擅自扩展业务修复。UI/接收信号复核仍为 pending。报告 `scpi-baseline_20261023_125240_302101.json` 位于当前 Debug 运行根目录 images/，完整过程见本次环境 TaskLog。
+
+2026-10-23 后续复测修正：用户指出 From List 不使用全局驻留，脚本现按活动模式保留逐点/全局其中一项查询与断言，并在模式切换时清掉未使用的继承期望。重跑失败所属 scans/files 两组，仍为 100 ms；35 点中 28 PASS、7 FAIL、35 张截图存在，最终 RF/MOD/Sweep OFF。原全局驻留误报消除；本轮 3 点出现 MScan 频率/功率/逐点驻留/范围与 JSON 不符，4 点为 Streaming 修改/开关或切 CW 的 Center/Level 不符。截图也显示这些状态；结束后一段时间只读电平仍为 -20 dBm，而最后 F-1 期望 -30 dBm，故至少该现象不能直接归为 100 ms 瞬时读回。原因待进一步定位，未改产品代码或放宽判据。新报告：`scpi-baseline_20261023_134351_581757.json`，原报告保留。
+
+2026-10-23 后续静态配置核对：用户要求仅按保存配置调整未通过 testcase，禁止重测。相关 7 份桌面 JSON 与运行副本哈希相同，原加载期望已匹配文件；额外手改段才引入不同目标。脚本移除 MScan 的 GLOBAL 0.5 s/范围 2～3/第三点 -25 dBm 编辑和 M-1 的 1.01 GHz/-35 dBm 编辑，改按保存值停启、开关和重载。F-1 仍须检查原文件的 -30 dBm。该变更尚未运行，不改旧报告，不据此宣称剩余加载差异已解决。
+
 ## 结论
 
 当前 SCPI 接入已经具备可复用的 parser / transport 基础，但产品集成层仍主要是“SCPI 远程驱动 UI + 写 Property”的过渡实现，而不是稳定的仪器控制服务。

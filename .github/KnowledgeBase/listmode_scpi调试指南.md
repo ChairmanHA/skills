@@ -1,10 +1,5 @@
 # ListMode SCPI 命令与 R&S 兼容调试指南
 
-基础版本：2026-09-07 实现。范围为 MScan/ListMode 的 36 个命令头（设置、查询分别计数）及调试所需公共命令，不是整机全部 SCPI 命令手册。
-
-2026-10-08 当前限制：因 MScan 暂不可用，SCPI 暂时禁止选择 MScan。`[SENSe:]SWEep:MODE` 只接受 `FREQ` / `POWER`，`[SOURce1:]FREQuency:MODE` 只接受 `CW`；两处设置 `LIST` 均由参数解析器拒绝，保留原状态。旧配置若恢复了 List，`SWEep:STATe ON` 返回 `-221`，需先选择 FREQ / POWER；`SWEep:STATe OFF` 和 `FREQuency:MODE CW` 仍可退出扫描。模式查询继续反映现有状态，List 草稿接口仍保留。下文涉及进入 LIST 和启动 MScan 的命令组合是历史调试流程，当前不能用于启动。
-
-Freq / Power 扫描使能已接通 `StepSweepPanel::triggerBtnEnabledChecked -> setBtnEnabledChecked -> enabledChanged`，复用 MainWindow 的 carrier 选择和发射请求链路。可使用 `SWEep:MODE FREQ`（或 `POWER`）、`SWEep:STATe ON` / `OFF` 和 `SWEep:STATe?`；使能表示提交现有扫描意图，不是异步硬件执行完成的证明。
 
 ## 1. 端口调试助手的使用方式
 
@@ -33,7 +28,9 @@ Freq / Power 扫描使能已接通 `StepSweepPanel::triggerBtnEnabledChecked -> 
 | `LIST:DWELl` / `LIST:DWELl?` | 设置／查询，单个数值 | 全局驻留时间；**裸值和查询值单位为秒** |
 | `LIST:DWELl:MODE` / `LIST:DWELl:MODE?` | `GLOBal` / `LIST` | 全局统一驻留／逐点独立驻留 |
 
-三列可分开写入，但当前提交时要求三列非空且等长，**即使使用 GLOBal 也需填入等长的 dwell 列**。查询点数对应完整草稿，不是选中子范围的点数。数值回读可能带字符串外层引号，驻留时间经过 float 路径后可能出现微小舍入差异。
+三列可分开写入，但当前提交时要求三列非空且等长，**即使使用 GLOBal 也需填入等长的 dwell 列**。查询点数对应完整草稿，不是选中子范围的点数。数值回读可能带字符串外层引号，驻留时间经过 float 路径后可能出现微小舍入差异。点表为空时 `LIST:FREQ?` / `LIST:POW?` / `LIST:DWEL:LIST?` 返回 `""`；框架对字符串结果统一加外层引号，处理函数不得自行再加引号，否则会被转义成 `""""""`。
+
+Save/Load 基线按**活动驻留来源**检查恢复：LIST 模式检查逐点 `LIST:DWEL:LIST?`；GLOBAL 模式检查 `LIST:DWEL?`。全局查询命令虽存在，但全局旧值不参与 LIST 模式执行，不能因此判列表配置加载失败。2026-10-23 已据用户现场说明修正自动化脚本，并实跑 LIST→GLOBAL→LIST 切换检查。
 
 ASCII 适合端口助手；批量脚本也可使用 IEEE 488.2 定长块 `#<位数><长度><数据>`。当前固定为 **REAL,64 大端字节序**，不是可由 `FORMat` 切换的 R&S 通用二进制格式；不支持 REAL,32 或 `#0`。提交范围最多 32767 点，4097 点 ASCII 和二进制传输及启动已完成回归。
 
@@ -133,9 +130,11 @@ LIST:RUNN?
 
 预期 RF 为 ON、模式为 LIST、最终 Running 为 1。UI 应显示 RF 开启及 ListMode 使能。
 
+注意：设备应用是异步的。上面脚本一次性连续发送时，最后一条 `LIST:RUNN?` 通常仍返回 0，因为 `FREQ:MODE LIST` 与 `OUTP:STAT ON` 只登记意图并请求异步刷新，批量命令处理完之前刷新尚未执行，设备应用完成后才会置 Running 为 1。请在脚本执行完后，单独重复发送 `LIST:RUNN?`（例如间隔约 1 秒）直到返回 1；`*OPC?` 和 `*WAI` 不会等待该异步应用。
+
 ### 场景 B：索引控制与子范围切片（复用场景 A 的点表）
 
-仅执行原表第 2、3 行，即 1001 MHz 和 1002 MHz。无需重新发送三列；切回 CW 后调整范围并重新提交。
+仅执行原表第 2、3 行，即 1001 MHz 和 1002 MHz。无需重新发送三列；关闭 RF 后调整范围并重新提交。
 
 ```scpi
 OUTP:STAT OFF
@@ -228,6 +227,97 @@ LIST:CAT?
 ```
 
 两次 MODE 查询均为 `"AUTO"`；目录先为 `"debug_list.lsw"`，删除后为 `""`。点表内容不因名称删除而清空。
+
+### 场景 F：空表与常见错误（排查“为什么进不了 LIST”）
+
+`*ERR?` 每次只取出一条错误，每条失败命令后读一次；预期结果见表格。
+
+```scpi
+*RST
+*CLS
+LIST:FREQ?
+LIST:FREQ:POIN?
+LIST:LEAR
+*ERR?
+LIST:FREQ 1000MHz,1001MHz,1002MHz
+LIST:POW -30,-30
+LIST:DWEL:LIST 10000,10000,10000
+FREQ:MODE LIST
+*ERR?
+FREQ:MODE?
+LIST:IND:STOP 5
+*ERR?
+```
+
+| 命令 | 预期 |
+|---|---|
+| `LIST:FREQ?` / `LIST:FREQ:POIN?` | `""` / 0（`*RST` 后草稿为空） |
+| 空表 `LIST:LEAR` | 错误 `-221`（三列必须非空） |
+| 列长 3/2/3 时 `FREQ:MODE LIST` | 错误 `-221`（三列须等长），`FREQ:MODE?` 仍为 `"CW"` |
+| `LIST:IND:STOP 5`（只有 3 点） | 错误 `-222`（索引超出草稿） |
+
+列长一致但设备未连接或点超出设备能力时，`LEARn` / `FREQ:MODE LIST` 分别返回 `-241` / `-222`。失败命令不会改变当前模式，可修正数据后直接重发。
+
+### 场景 G：用 SWEep 命令进入 MScan
+
+与 `FREQ:MODE LIST` 等效的另一条路径，适合已习惯 SWEep 命令的脚本。
+
+```scpi
+*RST
+*CLS
+LIST:FREQ 1000MHz,1001MHz,1002MHz
+LIST:POW -30,-30,-30
+LIST:DWEL:LIST 10000,10000,10000
+LIST:DWEL:MODE LIST
+LIST:IND:STAR 0
+LIST:IND:STOP 2
+SWEep:MODE LIST
+SWEep:MODE?
+SWEep:STATe ON
+SWEep:STATe?
+FREQ:MODE?
+OUTP:STAT ON
+*ERR?
+```
+
+预期依次为 `"LIST"`、`"ON"`、`"LIST"`，`*ERR?` 为 0。`SWEep:STATe ON` 使用与 `FREQ:MODE LIST` 相同的预检，草稿不合法时返回同样的错误且保持关闭。同样需稍后重复发送 `LIST:RUNN?` 直到为 1。退出用 `SWEep:STATe OFF`，随后 `FREQ:MODE?` 应为 `"CW"`。
+
+### 场景 H：运行中更新点表与停止后重新使能
+
+先完成场景 G，确认 Running 为 1。保持 RF 开启，改写同样数量的频率、功率点；驻留时间和范围沿用原值。
+
+```scpi
+LIST:FREQ 1100MHz,1101MHz,1102MHz
+LIST:POW -35,-30,-25
+LIST:FREQ?
+LIST:POW?
+*ERR?
+```
+
+回读应为新草稿：频率为 1100000000、1101000000、1102000000 Hz，功率为 −35、−30、−25 dBm，错误码为 0。此时尚未提交，实际输出应保持原来的 1000～1002 MHz 点表。再发送：
+
+```scpi
+LIST:LEAR
+*ERR?
+```
+
+预期错误码为 0，异步配置完成后输出切换到新点表。`LIST:RUNN?` 可能一直为 1，不能用它判断新点表是否应用完成，应观测实际 RF 输出确认频率与功率变化。
+
+最后关闭 RF、停止扫描，再直接重新使能，验证无需重发点表：
+
+```scpi
+OUTP:STAT OFF
+SWE:STAT OFF
+SWE:STAT?
+FREQ:MODE?
+SWE:STAT ON
+SWE:STAT?
+FREQ:MODE?
+OUTP:STAT ON
+*ERR?
+```
+
+四次状态查询依次应为 `"OFF"`、`"CW"`、`"ON"`、`"LIST"`，错误码为 0。稍后单独查询 `LIST:RUNN?` 应为 1，恢复执行新点表。
 
 ### 调试结束：停止输出并清理
 

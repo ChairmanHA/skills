@@ -106,7 +106,7 @@ flowchart LR
 
 1. 创建 `QLocalServer` 和随机 session token。
 2. 启动并持有一个 `SGStudioMiniBar` `QProcess`。
-3. 完成 AUTH/READY、消息 framing 和 64 KiB 上限检查。
+3. 完成 AUTH/READY、消息 framing 和 16 MiB 上限检查（支持完整 Multitone 候选音表）。
 4. 驱动 MainWindow/helper 的显隐状态机与 transition timeout。
 5. helper 异常时恢复 MainWindow；SGStudio 退出时统一结束 helper。
 
@@ -207,7 +207,7 @@ Transport：
 QLocalServer / QLocalSocket
 COMMAND [compact-json]\n
 single authenticated helper session
-64 KiB maximum line length
+16 MiB maximum line length
 ```
 
 Lifecycle：
@@ -515,6 +515,15 @@ device reopen while waiting
 当前没有冷启动 `AutoMinibarOnDevice` policy。main/helper 双隐藏只会出现在
 已经进入 minibar 后设备断开的状态。若部署要求无设备冷启动时完全隐藏，必须
 在 main startup 层新增显式 policy 和可恢复的失败策略。
+
+## Multitone 表格与复测（2026-10-26）
+
+- Main 和 helper 的 Tone Count 输入范围均为 `2..1024`。`countMaximum` 来自同一业务常量，不再按当前 spacing 算出 101 等临时输入上限；采样率/spacing 可行性继续由 Main 的 `resolveAndGenerate()` 统一解析并回写。
+- helper 沿用 Main 的候选音快照去重方式。editor 内的候选音缓存记录当前已显示勾选；单音/多选编辑提交前同步这份显示缓存。host 仍保留 Main 权威快照，等值确认无需刷新表格，拒绝或不同回填会恢复权威状态。
+- 候选音变化时复用现有 `QTableWidgetItem`，仅调整实际行数与变化的文本、latticeIndex、CheckState；不再因为一个 enabled 变化替换全部单元格。快照相同时不操作表格，Random 可见性不变时也不重新安排行布局。首次建表和新增行仍由表格拥有并释放 item。
+- 用户构建复测正常；Debug 日志显示 1000 行初次同步 42 ms，改单音为 999 enabled 后，响应与后续事件约 7 ms 完成且没有再次同步表格，随后正常处理 HIDE_MINIBAR。已报告的“1000 音改单音后 helper 无响应”场景确认修复；不能把这次 RF OFF/Mute 的 UI/IPC 复测扩展成所有硬件发射、1024 音或平台组合均已验收。
+- 复测完成后已删除排查专用的 MinibarIpc/MinibarMultitone/MinibarMod/MinibarHelper 日志、计时器和计数，以及 helper 全局 message handler、stderr 转发和启动/退出诊断连接。既有业务/协议错误日志保留；历史证据见 TaskLog `2026-10-26_confirm-minibar-multitone-fix-remove-diagnostics.md`。
+- 同次日志末尾另记录收到 SHUTDOWN 后以 0xC0000005/CrashExit 退出，发生在 ApplicationClosing 阶段；作为独立退出异常记录，不归入单音编辑卡死，也未在本次清理中改变关闭协议或推断其根因。
 
 ## 跨平台窗口边界
 

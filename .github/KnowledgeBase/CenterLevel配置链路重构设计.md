@@ -183,6 +183,8 @@ Mute 需要区分“上电但 RF 关闭”和“自动低功耗导致设备掉�
 
 这里应使用“延迟应用”而不是静默忽略：UI 和回写状态需要明确区分“用户请求值”和“当前扫描硬件实际生效值”。
 
+LScan/MScan 下 Level 与 RMS 的延迟应用方案已在 [RMS/PEP 配置方案](rms_pep_simd_cross_platform_design.md) 第 7.1 节给出：请求 base level 由扫描计划导出，回写不覆盖 Level 属性。
+
 ### 5.2 后续阶段的验证条件
 
 实现前需要确认 H2 在扫描运行时不调用 `tx_config_ffm` 是否能保持当前扫描稳定，并验证：

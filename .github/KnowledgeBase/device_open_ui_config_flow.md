@@ -222,6 +222,7 @@ Analog 插件当前已经明确把两阶段拆成两种语义：
 - 设备能力尚不可用时，MainWindow 保留 MScan 开关及 `TxSessionService::carrierPlan()` 的 ON 意图，不立即提交点表。无需单独 pending 标志；OFF、Preset 或后续配置选择会直接覆盖唯一的载波意图。
 - `TxSessionService::processPendingRefresh()` 通过原有 capability-ready / updates-suspended 门控后，在构造流水线快照前检查 MScan Submitted。仅当 Submitted 缺失或绑定的设备 UID / capability revision 过期时，调用原 `prepareSubmittedSnapshot()` 校验并重建；失败记录原错误、选择 Fixed，并通过既有信号将 UI 回写 OFF。
 - 已绑定当前设备的有效 Submitted 不因普通 refresh 自动提交更新的 Draft，保持编辑与 Apply 的边界。
+- 2026-10-22：MScan 用户 Enabled 控件在没有合法 Submitted 时禁用，但程序化配置恢复仍可保留 ON 意图；首次刷新补提交成功后由 submittedChanged 开放控件。MainWindow 的 ON / argsChanged 不再自行提交 Draft，避免普通切换将未 Apply 编辑提交。见 [按钮门控 TaskLog](../TaskLog/2026-10-22_gate-mscan-enable-on-submitted-table.md)。
 - 补提交放在消费刷新时，兼容设备切换中“先 open，再恢复目标 profile，最后解除挂起”的顺序；沿用原刷新调度，不增加延时或重试。
 - 用户已完成一次 Last State + Digital Playback + MScan 冷启动验收：日志显示恢复 200 点时能力不可用，设备连接后补提交，RF/MOD ON、Carrier:MScan，实际配置与回读均为 200 点，执行完成 `success=yes accepted=yes`。本轮临时 `[MScanRestore]` 跟踪日志已移除，提交失败保留常规原因诊断；其他场景仍只有静态核对。见 [修复 TaskLog](../TaskLog/2026-10-21_fix-mscan-last-state-restore.md)。
 

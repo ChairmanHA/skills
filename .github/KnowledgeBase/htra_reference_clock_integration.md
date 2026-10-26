@@ -116,7 +116,7 @@
 3. `CommonDeviceProfile` 只将 `RefClockSource / RefClockFrequency` 纳入 `CommonProfileGroup`；`SystemClockOut` 只保留为运行时镜像值
 4. `IBusiness::getCurrentProfile()` / `TxPipelineRuntime::fillDeviceProfile()` 仍会读取当前镜像值，保证其它公共参数重下发时不会顺手把 RefOut 冲掉
 5. `FancyDevice::configuration()` 在普通 apply 里仍会把 `Profile.systemClockOut` 透传给 `device_config_clock()`
-6. `FancyDevice::fillWritebackProfileLocked()` 在完整 common/mode 配置和其他参数回读之后调用 `queryReferenceClockLocked()` 查询/恢复，使用返回的实际时钟填充 writeback，完成信号再同步到 `CommonDeviceProfile`。`TxPipelineExecutor` 同时把实际参考源、频率与 RefOut 同步到 effective request
+6. `FancyDevice::fillWritebackProfileLocked()` 在完整 common/mode 配置和其他参数回读之后调用 `queryReferenceClockLocked()` 查询，使用返回的实际时钟填充 writeback，完成信号再同步到 `CommonDeviceProfile`。`TxPipelineExecutor` 同时把实际参考源、频率与 RefOut 同步到 effective request；External+15仅安排稍后的单次Internal配置
 7. Device Settings 页面在设备切换、open 状态变化、用户点击后，会主动 query 完整 `ReferenceClockState` 并刷新 `RefClockSource / RefClockFrequency / SystemClockOut`
 
 补充边界：
@@ -133,12 +133,14 @@
 4. 调用 `device_config_clock()`
 5. 若成功或 warning，则更新 `source_query/refFreq_query/clockOut_query`
 6. 完成 common 和模式/输出配置，再执行 writeback 中既有的载波、端口、LO 等回读
-7. 在原有时钟回读位置调用 `queryReferenceClockLocked()`：查询 External 返回 `H2_WARNING_SYSCLK_UNLOCKED (15)` 时，直接配置 `REF_INT / 100 MHz`，保留此次查询得到的 RefOut，再查询一次确认实际参考源为 Internal；不添加等待或循环重试
-8. 使用查询/恢复返回的实际时钟填充 writeback；时钟查询/恢复失败向 configuration 返回 false，不发布成功回写。没有 writeback 的配置仍在 common/mode 配置结束后查询
+7. 在原有时钟回读位置调用 `queryReferenceClockLocked()`：查询External返回 `H2_WARNING_SYSCLK_UNLOCKED (15)` 时，保留活动告警和原warning码，启动延迟计时；不在查询中立即配置或二次确认
+8. 使用查询返回的实际时钟填充writeback，15仍按正数warning成功返回；时钟查询失败向configuration返回false，不发布成功回写。没有writeback的配置仍在common/mode配置结束后查询
 
-设置页的 `queryReferenceClock()` 复用同一设备层规则，成功返回的是恢复后的实际时钟；该查询可能配置硬件，调用方通过 `setReferenceClock()` 同步结果。时钟切换会使设备的 Playback apply snapshot 失效。
+设置页的 `queryReferenceClock()` 复用同一采样规则，返回当次实际值，通过 `setReferenceClock()` 同步；查询本身不配置硬件。恢复等待门限已按用户要求降为100ms：既有实时状态线程在过门限的下一合法采样周期，先单次配置 `REF_INT / 100 MHz / 当前RefOut`，使Playback apply snapshot失效，再走该周期原本的普通clock查询。没有专门恢复确认查询或阻塞等待；实际动作仍随约1秒状态轮询触发，不是100ms主动回调，也不再因1000ms门限多等一轮。Streaming/低功耗/错误时延后。
 
-原始失锁 warning 15 保留到下一次实时状态发布，不会被恢复查询或其他普通正数 warning 覆盖；`getRealTimeStatus()` 消费后仍清零。状态栏沿用原始失锁报警与 RLO15，在下一次无 warning 的约 1 秒刷新中清除，不添加“已切回内部”的提示，也不新增周期时钟轮询。
+原始warning 15仍沿用既有warnningCode，不被其他普通正数覆盖，getRealTimeStatus消费一次提示后清零；活动15独立保留，普通查询正常/锁定后自然移除。状态栏沿用原15报警及RLO，不增加externalReferenceClockUnlock历史事件或“已切回内部”提示，也不手工定时清除活动项。
+
+2026-10-21新增非Streaming、已上电且本轮无已记录错误时的周期时钟检测，并按用户要求拆出延迟恢复；不改变配置后查询位置。每轮有效普通clock观测附带UID/能力revision，通过TxSessionService/TxPipelineRuntime同步变化后的已应用/稳定desired状态和CommonDeviceProfile；同值不重复发布，新请求待刷新或在途时不覆盖用户意图。恢复只尝试一次，失败继续保留告警和查询；显式clock配置/会话清理或有效锁定恢复后允许新尝试，显式查询和RefOut开关不重置次数。新的clock配置、正常锁定或已离开External会取消旧待执行动作。低功耗不被轮询唤醒，Streaming仍不新增硬件query。详情见[实时warning重构](htra_runtime_warning_polling_design.md)。仅静态检查，尚未构建或实机验收。
 
 2026-10-08 现场回归：将时钟查询提前至 `device_config_clock()` 紧后，导致用户反复切换时通常没有告警/恢复；恢复原 writeback 查询位置并加入诊断日志后，17:20:11–17:20:35 的 8 次 External 请求均返回 `status=15/source=1/locked=0`，恢复确认均为 `status=0/source=0/locked=1`，原 warning 15 保留到回写。配置返回日志到查询前日志间隔 0–7 ms，查询前/返回日志间隔 295–302 ms。日志同步加锁写文件，因此这些时间不是纯 API 耗时；本轮同时调整查询位置和日志，尚不能完全排除日志的时序影响，也不能据此宣称固件存在固定等待要求。后续如需区分，应保持 SDK 顺序，只移除查询前诊断输出做对照。详见 [查询顺序回归修正 TaskLog](../TaskLog/2026-10-08_reference-clock-query-timing-regression.md)。
 

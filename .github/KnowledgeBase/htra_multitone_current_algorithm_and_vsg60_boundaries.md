@@ -98,6 +98,8 @@ $$
 
 `Count` 控制候选 tone lattice 的离散个数，当前产品范围为 `2..1024`，但 odd/even 的排列方式不同。
 
+2026-10-26：Main 与 Minibar 的 Count 输入范围统一为 `2..1024`。Minibar 不再把当前 spacing 下可容纳的最大音数（例如 101）当成键盘输入上限；输入后仍由 Main business 解析设备能力并规范化 spacing。helper 候选表按显示快照去重、复用单元格；单音等值确认无需重建，latticeIndex 身份和生成算法保持不变。用户构建复测正常，日志确认 1000 音改单音后响应/事件约 7 ms 完成且未重复同步表格；该无响应场景已修复，临时诊断代码已移除。此次 UI/IPC 复测不代表全范围硬件发射验收。
+
 - 当 `Count` 为奇数时，候选 tone 是整数倍 `FreqSpacing`，因此包含 DC。
 - 当 `Count` 为偶数时，默认候选 tone 是半间隔错位的，即落在 $(n + 0.5) \cdot FreqSpacing$ 的位置，因此不包含 DC。
 
