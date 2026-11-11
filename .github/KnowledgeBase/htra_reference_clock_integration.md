@@ -2,6 +2,8 @@
 
 本文档总结当前 HTRA 参考时钟接入到 SGStudio 的现状、设计取舍、完整配置链路、当前前端实现以及剩余约束。
 
+2026-10-30 更新：外参考首次失锁后改为每 500 ms 有界确认，十次仍失锁才单次切 Internal；配置加载挂起、设备切换及新时钟配置使旧轮询/观测失效。原 warning UI 和 1 秒状态刷新不变，新增 `[RefClock]` 逐次日志。该规则取代本文历史的立即恢复及 100 ms 延迟描述；配置后查询仍在既有 writeback 位置。详见[当前确认规则](htra_runtime_warning_polling_design.md#2026-10-30-当前参考时钟确认规则)。仅静态实施，未构建/设备验收。
+
 注：当前实现已经把 `SystemClockOut (RefOut)` 从“UI 改动即触发公共重配”的链路中拆出，改为设备快捷控制；`RefClockSource / RefClockFrequency` 仍保留在公共配置链路中。设备查询回写使用完整参考时钟状态，覆盖 source / frequency / output。
 
 ## 1. 目标与边界
@@ -138,7 +140,7 @@
 
 设置页的 `queryReferenceClock()` 复用同一采样规则，返回当次实际值，通过 `setReferenceClock()` 同步；查询本身不配置硬件。恢复等待门限已按用户要求降为100ms：既有实时状态线程在过门限的下一合法采样周期，先单次配置 `REF_INT / 100 MHz / 当前RefOut`，使Playback apply snapshot失效，再走该周期原本的普通clock查询。没有专门恢复确认查询或阻塞等待；实际动作仍随约1秒状态轮询触发，不是100ms主动回调，也不再因1000ms门限多等一轮。Streaming/低功耗/错误时延后。
 
-原始warning 15仍沿用既有warnningCode，不被其他普通正数覆盖，getRealTimeStatus消费一次提示后清零；活动15独立保留，普通查询正常/锁定后自然移除。状态栏沿用原15报警及RLO，不增加externalReferenceClockUnlock历史事件或“已切回内部”提示，也不手工定时清除活动项。
+原始warning 15仍沿用既有warnningCode，不被其他普通正数覆盖，getRealTimeStatus消费一次提示后清零；活动15独立保留，同来源查询返回0时清除该来源活动项。2026-11-09按用户要求删除通过锁定位增删15的推导：warning码与locked分别忠实保留，18/未锁不补15，15/已锁不撤销真实15，也不跨来源清警。状态栏沿用原15报警及RLO，不增加externalReferenceClockUnlock历史事件或“已切回内部”提示，也不手工定时清除活动项。
 
 2026-10-21新增非Streaming、已上电且本轮无已记录错误时的周期时钟检测，并按用户要求拆出延迟恢复；不改变配置后查询位置。每轮有效普通clock观测附带UID/能力revision，通过TxSessionService/TxPipelineRuntime同步变化后的已应用/稳定desired状态和CommonDeviceProfile；同值不重复发布，新请求待刷新或在途时不覆盖用户意图。恢复只尝试一次，失败继续保留告警和查询；显式clock配置/会话清理或有效锁定恢复后允许新尝试，显式查询和RefOut开关不重置次数。新的clock配置、正常锁定或已离开External会取消旧待执行动作。低功耗不被轮询唤醒，Streaming仍不新增硬件query。详情见[实时warning重构](htra_runtime_warning_polling_design.md)。仅静态检查，尚未构建或实机验收。
 

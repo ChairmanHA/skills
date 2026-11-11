@@ -11,7 +11,7 @@
 | 设备发现、切换、USB/ETH、UID、多实例、时钟、Trigger、许可证 | [B-device](#b-device) |
 | Playback、ARB、WAV/IQS、采样率、带宽、容量、大波形 | [C-playback](#c-playback) |
 | LF AWG/TrueArb、Arb 波形编辑、AI 附件/波形预览、EasyWave、AM/FM/Ramp、Multitone、RMS、Digital/16QAM、频谱仪验证 | [D-waveform](#d-waveform) |
-| SCPI、程序级远程控制、命令接入、ListMode 命令兼容 | [E-scpi](#e-scpi) |
+| SCPI、程序级远程控制、命令接入、ListMode/幅度补偿 CORR 命令兼容 | [E-scpi](#e-scpi) |
 | Sweep/FScan、扫描业务、CW 模式切换、预校验 | [F-sweep](#f-sweep) |
 | Minibar、helper、typed IPC、LayerShellQt、浮窗 | [G-minibar](#g-minibar) |
 | MainWindow、QSS、LabelButton、DPI、多屏、布局、Wayland 全屏、延迟 show、消息弹窗 | [H-ui](#h-ui) |
@@ -35,49 +35,52 @@ Get-Content -Encoding UTF8 -LiteralPath "$kb\listmode_scpi调试指南.md" | Sel
 
 ## A-runtime
 
-- [入口：TX 请求、执行与回写](tx_execution_context_phase1_and_provider_migration.md)：TxSessionService / TxPipelineRuntime / executor / latest-intent。
+- [入口：TX 请求、执行与回写](tx_execution_context_phase1_and_provider_migration.md)：TxSessionService / TxPipelineRuntime / executor / latest-intent；Single 显式执行与配置去重边界。
 - [RF / Mod 业务概览](leader_rf_mod_business_overview.md)：公共设置、载波、基带、触发。
-- [GUI Save Load 与 SAStudio 功能回归](gui_save_load_sastudio_test_plan.md)：GUI/API 基线及精简 SCPI 自动化；basic/scans/files/repeat 覆盖 F/L/MScan、Playback/Streaming，外触发/参考及高功率/320M 按条件运行；100 ms 后查询并本地截图，GUI 专属操作保留人工，待实测。
+- [GUI Save Load 与 SAStudio 功能回归](gui_save_load_sastudio_test_plan.md)：默认按 Markdown 编号人工引导，--case/--list、32 项初始化/连续动作、结论后用例命名截图与独立结果；G6/K1 时序块、G12 人工键盘、M1 未连接前提、M2 文档/JSON 速率差异；保留显式批量与历史记录，引导已用户实测，结论截图增量待实测。
 - [单通道 H2 信号流 Home 设计依据](h2_single_channel_signal_flow_home_rationale.md)：仅依据当前 h2_api.h；USG 风格基带/调制/射频分工与状态证据边界，尚未实施。
 - [UI 无关运行时与迁移史](ui_independent_runtime_and_minibar_design.md)：CoreRuntimeServices / DeviceRuntimeBridge；旧 in-process 部分为历史。
 - [Provider ownership](analog_htra_provider_lifecycle_and_duplicate_panel_guard.md)：Analog / HTRA 调制归属与已删除的重复 panel 防护。
-- [Streaming 数据流](streaming_dataflow.md)：legacy 双线程、队列、中断与重启。
+- [Streaming 数据流](streaming_dataflow.md)：legacy 双线程、队列、中断与重启；文件列表整行拖放及按新顺序从头下发，静态核对待运行验收。
 - [Streaming 桥接与双通道方案](streaming_bridge_rearm_reboot_refactor_plan.md)：session / endpoint / rearm / reboot / quiesce。
-- [GNSS 接入](gnss_plugin_integration_summary.md)：菜单、配置、实时状态与 Streaming 禁配。
+- [GNSS 接入](gnss_plugin_integration_summary.md)：菜单、配置、实时状态与 Streaming 禁配；XPPS 失效回退 BUS、Sweep Single 逐脉冲整轮及等待节拍确认。
 - [插件加载](plugin_metadata_and_loading_architecture.md)：metadata / JSON 依赖 / PluginManager 顺序。
 - [退出与关机](app_shutdown_exit_flow.md)：shutdown 两阶段、线程释放、死锁。
 
 ## B-device
 
 - [入口：设备发现](device_discovery_architecture.md)：枚举与职责边界。
-- [设备切换与 UI 配置链](device_open_ui_config_flow.md)：open → UI → orchestrator / runtime；MScan Last State 恢复与能力就绪门控。
-- [多设备生命周期](htra_multi_device_stageA_design_and_debug.md)：current / retain-open / fallback / watchdog / A-B 机箱。
-- [多实例 USB 占用](multi_instance_usb_ownership_and_startup_gate.md)：InstanceStateRegistry / startup gate / UID 恢复。
+- [设备切换与 UI 配置链](device_open_ui_config_flow.md)：open → UI → orchestrator / runtime；MScan Last State 恢复与能力就绪门控；UID 快照仅用于双 ETH A/B，普通重连按当前 UI（静态实施）。
+- [多设备生命周期](htra_multi_device_stageA_design_and_debug.md)：current / retain-open / fallback / watchdog / A-B 机箱；同 IP 5000/5001 切换限定 UID 保存/恢复，不清理文件。
+- [多实例 USB 占用](multi_instance_usb_ownership_and_startup_gate.md)：InstanceStateRegistry / startup gate；USB fallback 保留当前 UI，不读写 UID 快照。
 - [手工 ETH 连接](manual_eth_connect_temporary_design.md)：临时设计、启动策略、IP:Port、模态连接。
 - [USB / ETH 断联恢复分析](eth设备和usb设备断联恢复的异同点分析.md)：失联判定、注销、coordinator 差异。
-- [H2 API v2.0 参考](htra_h2_api_v2_0_usage.md)：设备能力与 API 调用顺序。
+- [H2 API v2.0 参考](htra_h2_api_v2_0_usage.md)：设备能力与 API 调用顺序；13.4 记录 XPPS + Sweep + Single 的 API 确认语义及计数注释边界。
 - [设备设置与 Trigger 拆分](device_settings_panel_and_trigger_split_design.md)：Reference Clock / Trigger In-Out / RF Hardware；Routing 下输出 Hop/Sweep 只读并保留选择。
 - [参考时钟接入](htra_reference_clock_integration.md)：Profile / FeatureSpec、External 失锁切回 Internal 与实际状态回写。
-- [H2 实时 warning 轮询重构](htra_runtime_warning_polling_design.md)：活动告警集合、时钟周期检测、失锁延迟单次切Internal/普通查询自然清警及原UnLevel边界；静态实施，构建/设备验收待完成，不新增周期scan/FFM查询。
+- [H2 实时 warning 轮询重构](htra_runtime_warning_polling_design.md)：活动告警集合、外参考500 ms×10次确认后单次切Internal、配置加载/切设备失效及逐次日志；告警码与锁定位独立，禁止推导增删SDK告警；静态实施待构建/设备验收，不新增周期scan/FFM查询。
 - [Capability ID 分档方案](common_capability_id_and_hw_version_strategy.md)：model / hardware_version / 公共语义 ID。
 - [RF Port 能力与绑定](rfport_open_query_and_ui_binding.md)：open 查询、EnumTextButton / property。
 - [型号显示名](device_model_display_name_rules.md)：device_info.xml 条件别名。
 - [Analog 许可证](analog_device_license_gating.md)：FixedLic、USB/ETH 时序、UI 门控与隐藏页面启动恢复。
-- [PGA 平台状态](pga_runtime_realtime_status_chain.md)：CPU 温度、电池轮询、HLC 字段存在性与电池栏显示条件。
+- [PGA 平台状态](pga_runtime_realtime_status_chain.md)：HLC 决定菜单隐藏/Low Power 默认 ON/电池显示，保留旧单口 USB 兼容；CPU/电池、5–100 映射、低于 20% 仅填充变红、0% 水印/20 秒关机请求后继续监测（增量静态实现待设备验收）。
 - [GPIO 位掩码分析](GPIO_interface.md)：setbits / resetbits 语义推断，需核实 API 契约。
 
 ## C-playback
 - [RMS/PEP 配置与跨平台 SIMD 方案](rms_pep_simd_cross_platform_design.md)：默认保持 RMS、启动 RMS=Level、一次性 Level 建立新 RMS；LScan/MScan 功率置灰、FScan 按 baseband 反推；功能静态实现待验收，统计优化待实施。
-- [Level/RMS 异步交互与保存设计](rms_level_async_interaction_design.md)：version 5 功率意图保存/恢复、旧配置/Reset、公开 RMS SCPI；对称显示明确输入与未知派生 --，已知参考先预览、匹配成功才建锚；RF OFF 无波形 Mute 与硬件去重；已静态实施，未编译/运行，第 13 节为当前人工验收，下载阶段拆分等后续方向未实施。
-- [信号损伤方案：FPGA 噪声源与扫描同步补偿](signal_impairments_p0_interaction_design.md)：需求场景与常用参数、载波/噪声两种参考、为何扫描固定噪底需 FPGA 同步补偿、API/FPGA/前端 IQ 功能划分与顺序、简单版（全点同参，逐点差异走 SCPI）所需 API 草案,设计提案未实施。
+- [Level/RMS 异步交互与保存设计](rms_level_async_interaction_design.md)：version 5 功率意图保存/恢复、旧配置/Reset、公开 RMS SCPI；插件声明保持量，Pulse 保持 Level/RMS 只读，其他有界 baseband 默认 RMS；对称显示、RF OFF Mute 与硬件去重；已静态实施，未编译/运行，第 13 节及 G13 为人工验收，下载拆分等后续方向未实施。
+- [Level 参考面端口 IPC 与 API 接入准备](level_reference_plane_port_ipc_and_api_integration.md)：端口协议 2、共享不可变 adapter、POW:OFFS 已静态实施；Main 持有 Offset，Main/helper 状态/请求/回写统一端口值，显示/键盘转换一次；Offset 只刷新 presentation，不推进 Sweep revision。FFM/F/L/MScan API 继续端口面，未构建/运行，含后续验收清单。
+- [信号损伤方案：AWGN 与 I/Q 损伤在前端 IQ 层实现](signal_impairments_p0_interaction_design.md)：2026-11-10 撤销 FPGA 扫描同步方案的原因、固定噪声改用逐步改 SNR + 推导 Level、IQ 处理顺序与适用范围、首版无需新 API、FPGA 就绪后的迁移；3.3 统一 Level Offset 正增益/负线损、目标减 Offset 下发与同参考面回写；2026-11-10 AWGN/IQ 改为 Core 集中处理副本（>125 MiB 不支持）静态实施，未构建/运行。
+- [信号损伤 Impairments 页面入口与交互](signal_impairments_ui_entry_design.md)：CommonPanel Impair 按钮 2026-11-10 恢复显示（五按钮 Wide 阈值 1061 px），AWGN/I/Q 组标题显示处理状态，Minibar 不含损伤 UI/状态/IPC；内部保留 I/Q、AWGN、Freq/Clock 三组布局；User Flatness UI 更名 Amplitude Compensation，RF Hardware 的全局 Level Offset 入口隐藏。4.2 记录共享参考面 adapter、端口 IPC、common.LevelOffset 与端口面 CSV/profile；Freq/Clock 与补偿 API 已静态接入，含 Streaming、非空表 2–999 行、导入超限截断、空表 Apply 关闭补偿及三语 Excel；未构建/运行。
+- [Frequency / Sample Rate Error 人工验收](frequency_samplerate_error_test_plan.md)：CW ±Hz、对称三音中点/间距与 ±1000/临时 ±100000 ppm、Streaming 同采样率 WAV、四类载波×三类基带、旁路恢复/驻留重配与数值判据，含偶数多音 LO 补偿专项；方案未执行。
 - [Center/Level 配置链路重构设计](CenterLevel配置链路重构设计.md)：固定 Playback 的 FFM-only 当前实现；CW、Mute 与 LScan/FScan 的后续优化方向。
 - [入口：波形参数约束](Waveform_Parameters_Constraints.md)：默认值、采样率、IQ 带宽、UI 联动；含 AWGN 单遍/分块 FIR 优化、实测耗时及频谱/RMS验收。
 - [多型号 Playback 能力迁移](htra_multi_model_playback_capability_refactor.md)：能力域、revision、immutable payload、分阶段进度。
 - [设备能力参数策略](playback_waveform_parameter_capability_policy.md)：OPTION_BW_320M_TX、400 MSPS 与参数决策目标。
 - [产品参数决策矩阵](playback_parameter_product_decision_matrix.md)：无/有选件对比、待实现与待确认项。
 - [ARB 模式入口](arb_mode_summary.md)：Ordinary / IQS / ProgrammedArb 解析与 runtime 边界。
-- [OrdinaryWav 截取与周期](arb_ordinary_wav_slice_period_semantics.md)：sampleOffset / samplesToUse / period。
-- [大波形内存与下载](large_waveform_streaming_plan.md)：payload 驻留、125/1000 MiB、租约与下载后释放。
+- [OrdinaryWav 截取与周期](arb_ordinary_wav_slice_period_semantics.md)：sampleOffset / samplesToUse / period；Quick Waveform 业务统一裁剪、动态范围与无文件零周期。
+- [大波形内存与下载](large_waveform_streaming_plan.md)：payload 驻留、125/1000 MiB、租约、下载后释放与异步生成接续。
 - [Digital 大波形汇报](digital_large_waveform_status_summary.md)：截断播放与完整保存的阶段总结。
 - [Save IQ 导出 WAV](waveform_wav_export_format.md)：PCM16、I/Q 交织、prof JSON。
 - [IQS-WAV 格式参考](IQS-WAV文件格式说明.md)：录制文件、trig / prof MsgPack，区别于 Save IQ。
@@ -87,24 +90,22 @@ Get-Content -Encoding UTF8 -LiteralPath "$kb\listmode_scpi调试指南.md" | Sel
 - [AWG CSV 通用契约 1.0 与实现边界](arb_ai_exchange_template_and_preview_design.md)：链接唯一通用 Markdown；Save CSV 仅非 Arb 模式提供，Arb 移除 Save 占位并上移参数；17 项元数据、不保存选区，范围由用户消息描述。AI 交换固定 50 Ω/Linear，程序历史导入兼容性见正文；摘要只读；预览含 overview/局部查看范围、双击创建/拖动样点游标及标准时间按钮，Start 编辑固定右端并联动 Span、满量程可编辑；连续缩略图与分层极值缓存。format_version=1，等待测试，未接入打包分发。
 - [Arb 编辑需求与最小分段表设计](arb_editor_requirements_and_segment_table_design.md)：模板/快速库入口与 A/B/C/D/E 单路任务、Hold/Ramp/Data、按任务划分重采样边界及线性边沿语义；[交互简版](arb_editor_minimum_model_and_user_interaction.md)：保留原 A/B/D/E/F 编号的五类操作说明；均为尚未实施方案。
 - [TrueArb 硬件契约与七类波形算法](awg_truearb_waveform_algorithms_and_arb_editing.md)：C0 设备契约与算法；Amplitude、DC Offset、HighZ/50 Ω/Custom 负载含义及 CSV 导出恢复、预期播放电压；含 Pulse 参数联动与 DC 参数收敛（已实现、静态核对）、Noise 参数与算法调研（维持现状）、B0 对比与厂商调研。
-- [Digital 交互入口](digital_modulation_user_interaction_flow.md)：SPS、异步生成、截断、Instrument 截断选项触控尺寸与 SVG 留白、reset、保存。
-- [Multitone 算法入口](htra_multitone_current_algorithm_and_vsg60_boundaries.md)：tone / notch / phase / AutoScale / preview；Fixed 与 LScan 的偶数音 center 补偿；Main/Minibar Count 2..1024 输入边界。
+- [Digital 交互入口](digital_modulation_user_interaction_flow.md)：SPS、异步生成、截断、Instrument 截断选项触控尺寸与 SVG 留白、reset；2026-11-11 Save IQ 确认/选路径/预检后释放缓存、后台完整导出与真实写盘进度（静态实施，待运行验收）。
+- [Multitone 算法入口](htra_multitone_current_algorithm_and_vsg60_boundaries.md)：tone / notch / phase / AutoScale / 精确周期约简 / preview；Fixed 与 LScan 的 LO 遮盖 center 补偿（偶数音固定 s/2，奇数音禁中心/陷波时动态）；Main/Minibar Count 2..1024 与一致的表格处理规则，两端 1024 音改单音已用户实测通过。
 - [Multitone 与 VSG60 对比](multitone_vsg60_three_case_comparison_and_playback_consistency.md)：三组样本与 Playback 一致性。
 - [iqtone.m 借鉴候选](htra_multitone_iqtone_reuse_candidates.md)：历史参考、后续优化建议。
-- [Multitone / Pulse RMS 原理](htra_rms_power_multitone_pulse_principle.md)：PEP、占空比与满幅参考。
+- [Multitone / Pulse RMS 原理](htra_rms_power_multitone_pulse_principle.md)：PEP、占空比与双 32767 参考；厂商实践、Pulse 保持 Level/RMS 只读平均功率（已静态实施、标签布局不变），以及 AM/Ramp 功率参考边界。
 - [AM 自研对齐方案](am_baseband_self_implementation_alignment.md)：复基带参数、离散 IQ 与参考行为。
 - [FM 自研对齐方案](fm_baseband_self_implementation_alignment.md)：复基带参数与参考行为。
 - [Ramp 自研实现](ramp_self_implementation_alignment.md)：波形原理与 HTRA 实现边界。
 - [标准星座与 VSG60 坐标](digital_standard_constellation_vs_vsg60_custom_iq.md)：理论预览与自定义符号映射。
-- [16QAM raw cloud 原理](digital_16qam_raw_cloud_vs_symbol_constellation.md)：过采样、RRC、匹配滤波。
-- [16QAM 星座复现](digital_16qam_wav_constellation_reproduction_guide.md)：离线 WAV 分析与出图。
 - [N9040B AM/FM/PM 测试](n9040b_am_fm_pm_demod_test_plan.md)：射频解调验证方案。
 - [N9040B 窄脉冲测试](n9040b_pulse_detection_122_narrow_pulse_test_guide.md)：122 设备、Pulse Detection、Width / PRI。
 - [Ramp 频谱仪测试](htra_ramp_spectrum_analyzer_test_plan.md)：SWP / IQS / DET / RTA 验证方案。
 
 ## E-scpi
 
-- [入口：SCPI 接入审阅与方案](scpi_review_and_integration_plan.md)：TX/UI 回写、错误语义、ScpiIntentService 迁移；内部配置加载限 ASCII 路径、截图保存 images/；100 ms 基线历史实测与失败场景按保存配置静态校准，当前修改待重测，UI/RF 待核实。
+- [入口：SCPI 接入审阅与方案](scpi_review_and_integration_plan.md)：TX/UI 回写、错误语义、ScpiIntentService 迁移；LOAD/SAVE、images 截图、JSON 相对资源路径与 RMS/basic-only；幅度补偿 CORR **9 类功能、13 入口使用说明**：长短写、参数/响应、dB、草稿提交、逻辑名称、VAL?、ASCII/REAL64 示例与错误码。旧版测试 7/7 组通过，当前精简为 3 组；GUI/Reset/扫描/射频待验收。
 - [ListMode 命令调试入口](listmode_scpi调试指南.md)：TCP 5025、命令表、查询响应、逐点/全局活动驻留判据、SCPI 选择/使能 MScan 的预检与历史 R&S 实测流程。
 - [ListMode 接口设计](listmode接口实现.md)：含 GUI MScan 与 SCPI 共用的 Draft/Submitted/Applied、数据 Apply 与设备执行分离、Enabled 按钮门控、真实执行与兼容映射边界。
 - [R&S List Mode 参考](rs_list_mode_scpi_reference.md)：R&S 的 listmode scpi命令、触发、索引、学习与文件容器。
@@ -116,7 +117,7 @@ Get-Content -Encoding UTF8 -LiteralPath "$kb\listmode_scpi调试指南.md" | Sel
 
 ## G-minibar
 
-- [入口：双进程 Minibar](minibar_cs_helper_scpi_architecture.md)：main 设备 owner、helper typed IPC、乐观 UI、隐藏主窗提示抑制；大音数表格复用，1000 音改单音无响应已用户复测确认、临时诊断已移除；另记录关闭阶段异常。
+- [入口：双进程 Minibar](minibar_cs_helper_scpi_architecture.md)：main 设备 owner、helper typed IPC、乐观 UI、隐藏主窗提示抑制；Minibar 的 Impair UI、状态缓存与 IPC 字段已移除；MScan Enabled 复用 Main 的 Submitted 门控（静态实现）；Main/helper 表格机制一致，1024 音改单音已用户实测通过、临时诊断已移除；另记录关闭阶段异常。
 - [Wayland 交互排障入口](minibar_wayland_layershell_debug_guide.md)：surface / geometry / focus / lifetime，含历史证据。
 - [Helper LayerShell 现状](minibar_helper_layershell_parity_gaps.md)：base / keyboard / overlay、ownership、首次映射。
 - [LayerShellQt 集成](minibar_wayland_layer_shell_qt_integration.md)：Qt5 依赖、构建与排障，含旧 host 历史。
@@ -128,7 +129,7 @@ Get-Content -Encoding UTF8 -LiteralPath "$kb\listmode_scpi调试指南.md" | Sel
 - [QSS 入口](QSS_Best_Practices.md)：样式编写与工程约定。
 - [LabelButton 状态样式](labelbutton_style_state_workflow.md)：InfoButton、刷新链、RF / Settings / Sweep。
 - [双行按钮空间限制](labelbutton_dual_row_vertical_space_limit.md)：padding / labelMargins；[5 寸字号与物理换算](<5 寸 1024×600 的物理换算（“模拟”基线）.md>)：instrument 24px / 64px 参数按钮与真机验收边界。
-- [Level UNLEVEL badge](commonpanel_level_unlevel_badge_ui.md)：CommonPanel 局部标记。
+- [Level 状态 badge](commonpanel_level_unlevel_badge_ui.md)：CommonPanel 局部标记；补偿启用显示 AMPC，Offset 非零显示 OFST，可组合；UNLEVEL 优先并独占 badge，告警消除后恢复普通状态，静态实施待运行验收。
 - [Auto Mod 用户意图](auto_mod_user_intent_boundary.md)：FancyTabWidget 用户信号、main / Instrument MOD availability、外部使能请求、返回 Home 对齐与统一当前目标。
 - [调制列表响应式布局](fancytabwidget_modulation_list_responsive_layout.md)：单/双列、宽度与滚动条。
 - [TitleBar 菜单与溢出](titlebar_menubar_outputmode_and_overflow_behavior.md)：central grid 接入、输出模式、工具组、重复触摸。
@@ -139,7 +140,7 @@ Get-Content -Encoding UTF8 -LiteralPath "$kb\listmode_scpi调试指南.md" | Sel
 - [High DPI 入口](high_dpi_development_practices.md)：Qt5 缩放、资源倍率、多屏拖动。
 - [多屏 popup 几何](multiscreen_popup_geometry_and_screen_topology.md)：屏幕断开、DPI、EnumTextButton / ComboBox / QMenu。
 - [Frameless 白边排障](frameless_multimon_dpi_white_border_issue.md)：多屏与高 DPI。
-- [设备状态 UI 反馈](device_status_ui_feedback.md)：error / warning 去重、RLO15 短暂报警与 Minibar 例外。
+- [设备状态 UI 反馈](device_status_ui_feedback.md)：error / warning 去重、15–19 失锁滚动文案与状态生命周期、同码 RLO 轮播联动及 Minibar 例外；已移除状态未更新后缀/tooltip，内部确认状态保留。
 - [MessageDialog](messagedialog_design.md)：交互、hosted 层级与提示边界。
 - [NotificationPopup](controls_notification_popup.md)：非模态通知、动画、定位与自动关闭。
 - [Wayland 无边框弹窗](WAYLAND_FRAMELESS_OVERLAY_PATTERN.md)：overlay 与遮罩模式、List Mode 数字键盘与全局外部点击边界。
@@ -147,7 +148,7 @@ Get-Content -Encoding UTF8 -LiteralPath "$kb\listmode_scpi调试指南.md" | Sel
 
 ## I-input-pitfalls
 
-- [入口：软键盘体系](soft_keyboard_architecture.md)：数值键盘与单位同步、Sa/s采样率adapter、helper-local、Instrument 数值键盘 600 px 全高/主值与 Step 同行/窄拖动条，以及 5 寸文本键盘回显焦点与主题边界。
+- [入口：软键盘体系](soft_keyboard_architecture.md)：权威值/单位回写、同步重入与动态边界、Sa/s采样率adapter、helper-local；Instrument 数值键盘 600 px 全高/主值与 Step 同行/窄拖动条，以及 5 寸文本键盘回显焦点与主题边界。
 - [数值步长策略](numeric_step_strategy_guidelines.md)：可编辑 / 125 / 固定步长选择。
 - [树莓派系统键盘](wayland_raspberry_pi_system_keyboard_integration.md)：QLineEdit / QInputMethod / OSK0 / DBus。
 - [重复软键盘](Pitfalls/Property_Binding_Duplicate_SoftKeyboard.md)：隐藏 panel、多控件绑定、beginEditing 来源。
@@ -161,7 +162,7 @@ Get-Content -Encoding UTF8 -LiteralPath "$kb\listmode_scpi调试指南.md" | Sel
 - [入口：CMake 工作流](cmake_build_output_clean_run_workflow.md)：configure / build / 输出 / 清理。
 - [运行布局](runtime_layout_repo_root_vs_build_tree.md)：SGS_RUNTIME_LAYOUT、repo-root / build-tree、插件 staging。
 - [Windows clone 到 stage](windows_cmake_clone_build_stage_guide.md)：环境准备、依赖归属与交付包。
-- [打包脚本与水印](build_script_packaging_and_watermark_guide.md)：Windows/Linux 参数、含 BNC 的批量矩阵、rebuild 与归档。
+- [打包脚本与水印](build_script_packaging_and_watermark_guide.md)：Windows/Linux 参数、含 BNC 的批量矩阵、rebuild 与归档；build.bat/build.sh watermark ON 按实际 cache 附带 testcases/assets 与 Python 测试脚本，含树莓派 python3 运行说明，待打包验收。
 - [build.bat 打包依赖](windows_build_bat_updater_packaging_hygiene.md)：updater / 3rdParty 增量构建。
 - [MSVC 运行库打包](windows_stage_msvc_runtime_packaging_strategy.md)：runtime / UCRT / vc_redist 边界。
 - [Qt 混装与 SVG 失效](windows_qt_runtime_mixing_pitfall.md)：DLL 来源与 Debug/Release 差异。
@@ -171,7 +172,7 @@ Get-Content -Encoding UTF8 -LiteralPath "$kb\listmode_scpi调试指南.md" | Sel
 
 ## K-linux
 
-- [入口：Linux 构建发布](linux_build_package_unified_entry.md)：250 / 108 两入口、VMware 批量构建、Raspberry Pi / RK3588 共用包、直接启动。
+- [入口：Linux 构建发布](linux_build_package_unified_entry.md)：250 / 108 两入口、VMware 批量构建、Raspberry Pi / RK3588 共用包、直接启动；build.sh 树莓派包不再生成根 launcher。
 - [AArch64 兼容性](raspberry_pi_132_build_host_250_compatibility.md)：ABI、Qt、Wayland/xcb 与双目标验收。
 - [x86_64 X11 与 Wayland 迁移方案](linux_x86_64_x11_and_future_labwc_wayland.md)：当前 xcb/QWindowKit 主窗边界、未来 labwc artifact。
 - [RPATH](RPATH_MECHANISM.md)：$ORIGIN 相对库路径。
@@ -179,7 +180,7 @@ Get-Content -Encoding UTF8 -LiteralPath "$kb\listmode_scpi调试指南.md" | Sel
 
 ## L-updater
 
-- [入口：Updater 当前实现](updater_firmware_update_mechanism.md)：在线/离线版本策略、下载、version.json、型号默认/选件特殊版本、Schema 1/2 与旧读取器兼容、H2 命名空间过渡、maintenance。
+- [入口：Updater 当前实现](updater_firmware_update_mechanism.md)：在线/离线版本策略、下载、version.json、型号默认/选件特殊版本、Schema 1/2 与旧读取器兼容、H2 命名空间过渡、maintenance；跨平台固件前单次目录探针、失败仅确认提示与 Local Default 豁免（已简化，待验收）。
 - [Updater 整改重点](updater_mechanism_gap_and_remediation.md)：已收敛行为、剩余问题与验收。
 - [Standard CN 远程更新联测](standard_cn_remote_manual_update_test_guide.md)：发布 URL、包结构、手工下载与回滚。
 - [A/B 顺序固件更新分析](shared_chassis_ab_sequential_updater_analysis.md)：共享 IP 概率失败、待取证假设。

@@ -1,5 +1,9 @@
 # Minibar Helper IPC Architecture
 
+2026-11-09 Impair 清理：Minibar 不包含任何损伤按钮、只读状态或编辑入口；已删除 helper 的按钮、snapshot 解析、bool/seq 缓存与刷新逻辑，以及 main 的损伤订阅、`tx.impairEnabled` 字段和私有协议键。展开栏高度继续从实际布局计算，不留占位。Main 的损伤参数、持久化与设备链路仍由原 owner 管理，切换 Minibar 不新增清零/关闭行为。此次仅静态检查，未编译或运行；见 [TaskLog](../TaskLog/2026-11-09_remove-minibar-impairments.md)。下文 2026-11-05 的只读 Impair 说明为已被本次变更替代的历史。
+
+2026-11-05 端口协议已静态实施：业务状态及完整请求统一使用端口功率，helper 在展示/键盘边界应用 Main 提供的不可变转换快照，不拥有 Offset 设置。Main/helper 协议已成对升级为 2；Offset 只更新展示快照，不再推进 Sweep 业务 revision。尚未编译/运行，协议与 API 边界统一见 [Level 参考面端口 IPC 与 API 接入准备](level_reference_plane_port_ipc_and_api_integration.md)。
+
 ## Branded executable identity
 
 The internal CMake target remains `SGStudioMiniBar`, but the built executable and
@@ -33,10 +37,11 @@ role and their existing presentation paths.
 - Sweep plan identity is transported by stable string IDs: `fscan`, `lscan`, `mscan`, and `unsupported`. Numeric `Sweep::SweepType` values never cross the IPC boundary.
 - `mscan` remains in `supportedPlanIds` so the helper can reflect an externally selected MScan state. The Sweep Type menu offers only Freq and Power; it cannot select MScan.
 - When MScan is configured, the MiniBar Sweep button remains present and clickable, displays `List Mode`, and keeps the existing checked style as its enabled-state indication.
-- The MScan Sweep popup keeps the ordinary Sweep title plus editable Enabled/Sweep Type controls. The parameter area displays `MScan must be used in the full application.` The Sweep Type menu can switch from MScan to Freq or Power.
+- The MScan Sweep popup keeps the ordinary Sweep title and Enabled/Sweep Type controls. Enabled follows the same submitted-table gate as Main; Sweep Type can still switch from MScan to Freq or Power when Enabled is unavailable. The parameter area displays `MScan must be used in the full application.`
 - The MScan table is not serialized to the helper. Its Draft remains owned by main-side `MScanTableService`; the main-window ListModePanel is currently not initialized.
 - `unsupported` remains reserved for an unknown or genuinely unsupported future plan and must not be used as the ListMode identity.
 - `SweepSnapshot::available` describes MiniBar common Sweep authoring support, not the device's instantaneous open state: it is true when the main Sweep panel exists and the configured plan is Freq, Power, or List. Device open state remains an independent snapshot/lifecycle concern.
+- `SweepSnapshot::listEnableAvailable` is read-only UI metadata from `StepSweepPanel::canEnableSweep(MScan)`, sharing Main's `Submitted.valid` rule. Without a valid submitted table, the helper disables MScan Enabled before any local toggle/request; Draft edits alone do not open it. Apply makes it available without turning it ON; a retained valid Submitted remains usable after later Draft edits. The flag is independent of the selected plan so an optimistic switch to Freq/Power can immediately restore Enabled availability. `submittedChanged` reaches the existing `stateChanged`/snapshot path even when scalar authoring state is unchanged; this metadata change does not advance the authoring revision. This Main/helper change was statically checked on 2026-10-29; build and runtime verification remain pending.
 - Sweep snapshots and revisioned complete-state requests always carry Enabled, selected plan, retained Freq parameters, retained Power parameters, and shared analog dwell. List table contents stay main-only. Consequently, main-side scalar edits advance the Sweep revision, stale helper writes conflict/rebase, and an accepted response returns the authoritative scalar state without either UI keeping a second parameter truth.
 
 本文记录当前双进程 minibar 的稳定架构边界。主 SGStudio 进程保留普通
@@ -213,7 +218,7 @@ single authenticated helper session
 Lifecycle：
 
 ```text
-AUTH <token>
+AUTH {"v":2,"token":"<token>"}
 READY
 SHOW_MINIBAR <x>,<y>
 VISIBLE
@@ -273,7 +278,7 @@ profile/editor action 不携带 `enabled`，因此浏览或编辑其它 MOD pane
 3. `tx.rf/rfText`。
 4. `tx.applyRevision/applySucceeded`：main 配置完成序列和最近一次完成结果。
 5. `tx.centerHz/centerText/centerUnit/centerStepHz`。
-6. `tx.levelDbm/levelText/levelUnit/levelStepDb`。
+6. `tx.levelPortDbm/levelValid/levelUnit/levelStepDb`、`rmsTargetPortDbm/rmsValid`；helper 按只读 `presentation.powerOffsetDb` 本地生成用户面文本。
 7. `sweep`：availability、revision、enabled、configured `fscan/lscan`、两套保留
    参数和共享 dwell。
 8. `mod`：`businesses[]` 使用稳定的 `id`、来自 `IBusiness::name()` 的 `name`，以及来自
@@ -330,6 +335,10 @@ Sweep 的 `revision` 与 snapshot `seq` 不是同一个维度：`seq` 对整个 
 排序，`revision` 只保护 authoring state 的 compare-and-submit。helper 修改任一
 字段时发送完整状态与 `expectedRevision`；main 发现冲突就拒绝并立即推送新
 snapshot。disabled Sweep 仍保留 configured plan，不能从 applied `Fixed` 推导。
+历史用户面协议的失配原因（已由协议 2 取代）：Level Offset 改变时曾必须同步推进 revision，因为完整请求里的用户面
+LevelStart/Stop 已经过期。RemoteMinibarService 在 offsetChanged 中推进 revision 后再调度快照，
+旧请求在 toPort/apply 前走 kConflict；helper 在新快照上只叠加 active edit mask，避免仅编辑频率
+时把未编辑电平按新 Offset 反算而改变端口输出。此 revision 不修改 MScan 数据修订或 Apply。
 这里的完整提交只约束 IPC authoring 语义；main 仍复用 `StepSweepPanel` 的既有
 preview/normalize、enabled/args refresh 和 runtime writeback。若 preview 同时
 规范化 common settings，会按现有 `CommonDeviceProfile` 路径刷新。
@@ -523,6 +532,8 @@ device reopen while waiting
 - 候选音变化时复用现有 `QTableWidgetItem`，仅调整实际行数与变化的文本、latticeIndex、CheckState；不再因为一个 enabled 变化替换全部单元格。快照相同时不操作表格，Random 可见性不变时也不重新安排行布局。首次建表和新增行仍由表格拥有并释放 item。
 - 用户构建复测正常；Debug 日志显示 1000 行初次同步 42 ms，改单音为 999 enabled 后，响应与后续事件约 7 ms 完成且没有再次同步表格，随后正常处理 HIDE_MINIBAR。已报告的“1000 音改单音后 helper 无响应”场景确认修复；不能把这次 RF OFF/Mute 的 UI/IPC 复测扩展成所有硬件发射、1024 音或平台组合均已验收。
 - 复测完成后已删除排查专用的 MinibarIpc/MinibarMultitone/MinibarMod/MinibarHelper 日志、计时器和计数，以及 helper 全局 message handler、stderr 转发和启动/退出诊断连接。既有业务/协议错误日志保留；历史证据见 TaskLog `2026-10-26_confirm-minibar-multitone-fix-remove-diagnostics.md`。
+- 2026-10-27 用户进一步确认 helper 的 1024 音改单音正常，Main 原先仍卡死；在 `multitonepanel.cpp` 补齐显示缓存同步和 item 复用后，用户构建实测确认 Main 也已正常。本次问题关闭，按用户要求停止历史归因调查；helper 和 IPC 未改动，也未重新加入临时日志。
+- 两端现采用相同的表格处理规则：按 latticeIndex 提交完整使能集合，提交前同步显示缓存，等值快照跳过刷新，变化快照复用 item 并仅写差异。Main 使用 typed candidate、本地调用，helper 使用 JSON snapshot、私有 IPC，最终均进入 Main 同一个 MultitoneModulation 的 setEnabledToneIndices/resolveAndGenerate 与 generator；不另建 helper 业务状态或生成路径。
 - 同次日志末尾另记录收到 SHUTDOWN 后以 0xC0000005/CrashExit 退出，发生在 ApplicationClosing 阶段；作为独立退出异常记录，不归入单音编辑卡死，也未在本次清理中改变关闭协议或推断其根因。
 
 ## 跨平台窗口边界
@@ -559,6 +570,8 @@ Wayland：
 [minibar_wayland_layer_shell_qt_integration.md](minibar_wayland_layer_shell_qt_integration.md)。
 
 ## 当前扩展边界
+
+历史记录（2026-11-05；其中只读 Impair 状态已于 2026-11-09 删除）：信号损伤改为三个独立组，无总开关。main-side owner 是 CoreRuntimeServices 持有的 `SignalImpairmentsSettings`，不进入设备 Profile/TX/API。snapshot 的 `tx.impairEnabled` 为三个组 State 的逻辑 OR，不是设备配置确认。helper 展开栏只读显示 Impair ON/OFF，不再提供切换操作；原私有命令 `UI:IMPAIR:STATE`、latest-intent 和请求回调已删除，参数编辑仍在主窗口。Level/RMS/LScan 的 helper 状态、乐观意图、完整请求及回写均为端口值；O 只在共享 adapter 的显示/键盘边界应用。Offset 改动只刷新 presentation，不改变 Sweep authoring revision 或 TX。该主程序与 helper 是同包配套消费者，协议版本为 2；认证和 JSON envelope 校验版本，功率 snapshot 验证上下文、有效性及端口数值，非法数据断开而不回退到零 O。此次按用户要求未编译、运行或测试，运行验收待完成。
 
 1. `MinibarIpc` static target 集中 version、command/field constants、JSON
    codec、envelope builder、typed Sweep/MOD DTO 和 line framing。

@@ -92,13 +92,17 @@ $$
   再删除满足 $|f_{logical}| < \frac{NotchWidth}{2}$ 的候选 tone。
 - 若 notch 覆盖到全部 candidate tones，则当前实现允许 active tones 变成 `0 tone`；生成阶段会把它解释为静默 playback waveform，而不是空 payload。
 
-因此，当前 notch 的产品语义始终围绕用户看到的逻辑 center；它不是任意中心频率 notch。偶数 mask 模式只改变判断所用的坐标，不改变 tone 实际用于 IQ 合成的基带频率。
+- 当 `EvenCountCenterToneMask = true` 且 `Count` 为奇数时，notch 直接按逻辑坐标删除 tone；删除后若逻辑 0 Hz tone 不在 active 集合中（`NotchWidth > 0` 时必然如此），再按 §2.8 把一根最近的 active tone 平移到设备基带 DC，用它遮盖 LO。
+
+因此，当前 notch 的产品语义始终围绕用户看到的逻辑 center；它不是任意中心频率 notch。偶数 mask 模式只改变判断所用的坐标，不改变 tone 实际用于 IQ 合成的基带频率；奇数 mask 模式先在逻辑坐标完成选音，然后才平移 active tones 的基带频率，`effectiveNotchWidth` 仍按逻辑坐标计算。
 
 ### 2.5 Count
 
 `Count` 控制候选 tone lattice 的离散个数，当前产品范围为 `2..1024`，但 odd/even 的排列方式不同。
 
 2026-10-26：Main 与 Minibar 的 Count 输入范围统一为 `2..1024`。Minibar 不再把当前 spacing 下可容纳的最大音数（例如 101）当成键盘输入上限；输入后仍由 Main business 解析设备能力并规范化 spacing。helper 候选表按显示快照去重、复用单元格；单音等值确认无需重建，latticeIndex 身份和生成算法保持不变。用户构建复测正常，日志确认 1000 音改单音后响应/事件约 7 ms 完成且未重复同步表格；该无响应场景已修复，临时诊断代码已移除。此次 UI/IPC 复测不代表全范围硬件发射验收。
+
+2026-10-27：用户确认 Minibar 的 1024 音改单音正常，但 Main 相同操作仍无响应。核对发现前述表格优化只覆盖 helper；Main 在同步业务回填时仍因 enabled 与旧显示缓存不同而替换整表 item。本轮 Main 同样在发出完整使能集合前按 latticeIndex 同步现有显示缓存，等值候选回填直接跳过刷新；确有候选变化时复用单元格并只写变化的行数、文本、latticeIndex 和勾选。生成/规范化仍归业务 owner；本轮不改算法、中心补偿或功率设置。用户随后构建实测确认 Main 修复有效，已核对两端表格处理规则及 Main 业务入口一致，本次无响应问题关闭；按用户要求不再追查历史原因，不将该结论扩大为全部硬件组合验收。
 
 - 当 `Count` 为奇数时，候选 tone 是整数倍 `FreqSpacing`，因此包含 DC。
 - 当 `Count` 为偶数时，默认候选 tone 是半间隔错位的，即落在 $(n + 0.5) \cdot FreqSpacing$ 的位置，因此不包含 DC。
@@ -125,6 +129,8 @@ $$
 
 这里 $\Delta f = FreqSpacing$。
 
+odd `Count` 的 candidate tones 不受 `EvenCountCenterToneMask` 影响，始终是上面的逻辑 lattice。mask 打开且逻辑 0 Hz tone 不在 active 集合中时，只有选音后的 active tones 会被整体平移，规则见 §2.8。
+
 ### 2.6 FreqSpacing
 
 `FreqSpacing` 是 tone lattice 的相邻频率间隔。当前实现中它至少为 `1 kHz`，并且还会和 `Count` 一起受采样率上限约束。
@@ -142,12 +148,22 @@ $$
 
 `EvenCountCenterToneMask` 是 generator profile 内的临时绕过开关，当前不在 multitone 面板 UI 上暴露。
 
-- `false`：偶数 `Count` 继续使用 half-spacing lattice，不包含 DC；该行为与当前 SMA / VSG60 对齐。
-- `true`：仅当 `Count` 为偶数时，把默认偶数 lattice 整体偏移 `-(FreqSpacing / 2)`，使一根 tone 正好落到 `0 Hz`，用于临时遮盖实机中心频率本振泄露。
+- `false`：偶数 `Count` 继续使用 half-spacing lattice，不包含 DC；奇数 `Count` 的设备中心始终等于逻辑中心。该行为与当前 SMA / VSG60 对齐。
+- `true`，偶数 `Count`：把默认偶数 lattice 整体偏移 `-(FreqSpacing / 2)`，使一根 tone 正好落到 `0 Hz`，用于临时遮盖实机中心频率本振泄露。设备中心偏移固定为 `FreqSpacing / 2`，与 active 选择无关。
+- `true`，奇数 `Count`（2026-10-27）：逻辑 0 Hz tone 处于 active 时，与 `false` 完全相同。它被禁用（离散模式），或落入 `NotchWidth > 0` 的陷波时，LO 会出现在陷波中心。此时从 active tones（multiplier `k`）中选 `k_Δ`，依次比较：
+  1. 使基带半跨度 `max(k_max − k_Δ, k_Δ − k_min)` 最小；
+  2. 平局时取 `|k_Δ|` 较小者；
+  3. 再平局时取正频率。
 
-generator profile 字段自身默认值仍是 `false`，但当前 HTRA `MultitoneModulation` 构造时会默认调用 `setEvenCountCenterToneMask(true)`。这个开关打开后，tone lattice 不再与 SMA / VSG60 的偶数 `Count` 行为一致。它应被理解为硬件问题收敛前的 generator 级临时 workaround，而不是新的对标语义。
+  然后令所有 active tone 的 `multiplier -= k_Δ`、`requestedFrequency = multiplier · FreqSpacing`，设备中心偏移为 `k_Δ · FreqSpacing`。被平移到 DC 的 tone 由 `targetMean` 保留其相量。陷波判断、相位（按 `latticeIndex`）和候选表显示都保持逻辑坐标。没有 active tone 时不平移。
 
-2026-09-30 更新：FixedPlayback 和 Playback LScan 配套一个临时 RF center offset。HTRA Multitone provider 在 `EvenCountCenterToneMask = true` 且 `Count` 为偶数时，会在 `TxProviderExecutionContext` 中请求 `FreqSpacing / 2` 的 `fixedPlaybackCenterOffsetHz`；补偿规则只归属 Multitone，其他 provider 默认值为零。`TxPipelineExecutor::applyFixedPlayback()` 在设备配置时把实际下发中心频率改成 `logicalCenter + FreqSpacing / 2`，并在 `deviceConfigurationDone` writeback 前恢复 logical center。
+这个开关的名字保留 `EvenCountCenterToneMask`，以兼容已持久化的 JSON 键，但语义已覆盖奇偶两种 `Count`。2026-10-27 起，generator profile 字段和成员默认值都是 `true`，`Reset` 也保持开启。`restoreSettings()` 在缺少该键时同样取 `true`，旧配置中显式保存的 `false` 仍被尊重。`MultitoneModulation` 构造函数不再单独调用 setter。
+
+这个开关打开后，tone lattice 不再与 SMA / VSG60 的偶数 `Count` 行为一致。奇数 `Count` 禁用中心音或使用陷波时，基带 IQ、Save IQ 导出的 WAV 和频谱预览都会被平移、变得不对称，RF 频点则在设备中心补偿后回到逻辑位置。被遮盖的 tone 会与 LO 泄漏矢量叠加，存在幅度和相位误差；最坏情况（离散模式只保留两端 tone）需要约 2 倍基带带宽。它应被理解为硬件问题收敛前的 generator 级临时 workaround，而不是新的对标语义。
+
+偏移值归属于生成结果：generator 把它写入 `MultitoneGenerationMetrics::deviceCenterOffset`，provider 在 payload 校验通过后用它填充 `fixedPlaybackCenterOffsetHz`，不再从实时 profile 推算。这样可以避免 profile 已改变、旧 payload 仍为 ready 时，偏移与 IQ 不一致。
+
+2026-09-30 更新：FixedPlayback 和 Playback LScan 配套一个临时 RF center offset。HTRA Multitone provider 在 `EvenCountCenterToneMask = true` 且 `Count` 为偶数时，会在 `TxProviderExecutionContext` 中请求 `FreqSpacing / 2` 的 `fixedPlaybackCenterOffsetHz`（2026-10-27 起改为请求生成结果中的 `deviceCenterOffset`，奇数遮盖时为 `k_Δ · FreqSpacing`）；补偿规则只归属 Multitone，其他 provider 默认值为零。`TxPipelineExecutor::applyFixedPlayback()` 在设备配置时把实际下发中心频率改成 `logicalCenter + FreqSpacing / 2`，并在 `deviceConfigurationDone` writeback 前恢复 logical center。
 
 `TxPipelineExecutor::applySweepPlayback()` 仅在 `CarrierPlanKind::LScan` 下复用该偏移：基础 FFM 配置和 `startPlaybackLevelSweep()` / `tx_config_lscan()` 使用同一个补偿后 center。基础配置回写、无波形等待路径，以及扫描查询成功/失败的最终回写都保持逻辑 center，避免 UI / `CommonDeviceProfile` 漂移或重复加偏移。FScan、MScan、CW 和 Streaming 不消费该偏移；不修改用户配置或全局中心频率。
 
@@ -161,6 +177,7 @@ generator profile 字段自身默认值仍是 `false`，但当前 HTRA `Multiton
 - 它不是表格显示顺序，也不是任意频率向量；当前面板表格按相对界面逻辑 center 的频偏从低到高展示。
 - 普通模式下，表格频偏与实际 IQ/baseband `requestedFrequency` 相同。
 - 当 `EvenCountCenterToneMask = true` 且 `Count` 为偶数时，表格显示 `requestedFrequency + FreqSpacing / 2`，使用户看到的逻辑 RF 频偏保持左右对称；generator、bin mapping 和 IQ 合成仍使用未改写的 `requestedFrequency`。
+- 当 `EvenCountCenterToneMask = true` 且 `Count` 为奇数时，候选表的 `requestedFrequency` 与 `displayFrequency` 都是逻辑频偏，不随 LO 遮盖改变；只有生成结果 `MultitoneToneInfo::requestedFrequency` 和 IQ 使用平移后的基带频率。
 - canonical 规则只做合法 `latticeIndex` 过滤、去重与稳定排序，不再强制补齐到至少 2 根。
 - 默认或未显式初始化时，candidate tones 全部开启；但在离散保留音模式下，若显式保存空集合，则表示 `0 tone`。
 - `0 tone` 不表示空 payload，而是要求 generator 产出一段合法的静默 playback waveform。
@@ -236,6 +253,8 @@ $$
 Count \cdot FreqSpacing \le 100\ MHz
 $$
 
+当 `EvenCountCenterToneMask = true`、`Count` 为奇数且发生 LO 遮盖时，下限 $1.25 \cdot 2 \cdot \max|f - \Delta|$ 自动包含平移量。完整 lattice 加陷波（$h = NotchWidth/2$，$m = (Count-1)/2$）时，最外侧基带频偏为 $(m + j)\Delta f$，其中 $j\Delta f$ 是陷波外最近 tone 的频偏，满足 $j\Delta f < h + \Delta f$。
+
 这就是当前 `Count` 和 `FreqSpacing` 联动收敛的核心下限边界。最终 `sampleRate` 可能会因为 `fundamentalStep` 对齐而略高于这个下限，但不会超过设备上限。
 
 ### 3.2 当前 business 与 generator 如何分工收敛参数
@@ -247,7 +266,7 @@ $$
 - `FreqSpacing >= 1 kHz`
 - `NotchWidth >= 0`
 - `FixedPhaseOffset` 归一化到 $[0, 2\pi)$。
-- `EvenCountCenterToneMask` 未显式提供时默认为 `false`。
+- `EvenCountCenterToneMask` 未显式提供时默认为 `true`（2026-10-27 起，Reset 同样如此）。
 - `EnabledToneIndices` 过滤为合法 `latticeIndex` 集合。
 - 若未显式提供 `EnabledToneIndices`，则沿用“默认全开”；若在离散保留音模式下显式提供空集合，则允许 zero-tone，并在生成阶段输出静默 waveform。
 - notch 路径不再强制保留外侧两根 tone；若 notch 把 active tones 全部清空，也同样进入静默 waveform 语义。
@@ -255,7 +274,10 @@ $$
 上述 sanitize 和 candidate index canonicalization 属于 generator 的固有 profile 语义。`1024` 是独立于设备带宽的产品上限，旧 preset、远程编辑和普通 UI 输入都必须先经过该上限收口。之后的设备交叉约束由 `MultitoneModulation` 完成：
 
 1. 先用当前 `Count/FreqSpacing` 直接求 plan；精确可用的 400 MHz lattice 在这一步保留。
-2. 原组合无 plan 时保持 `Count`，按 current continuous maximum 计算并永久回写可用的最大 `FreqSpacing`。
+2. 原组合无 plan 时保持 `Count`，按 current continuous maximum 计算并永久回写可用的最大 `FreqSpacing`。该值取完整 lattice 估算与奇数 LO 遮盖估算中的较小者，后者具体为：
+   - 离散模式：取 `FreqSpacing · Fmax / minimumSampleRate`。enabled 集合与间隔无关，需求随间隔线性变化，所以这个值是精确的。
+   - 陷波模式：取 `(Fmax/2.5 − h)/(m+1)`。这是充分条件，因为陷波宽度为绝对频率，不随间隔缩放。
+   - 未发生遮盖时为 +∞，等价于不额外收紧。
 3. 只有该间隔低于 1 kHz 时，才固定 `FreqSpacing = 1 kHz` 并降低 `Count`；`setCount()` 继续按 multiplier 映射能保留的 tone 选择。
 4. 按 current capacity 计算 sampleCount/layout，并向 generator 提交精确 `sampleRate + PayloadLayout`。
 
@@ -347,6 +369,7 @@ $$
 - odd lattice 的 base unit 是 `FreqSpacing`
 - 默认 even lattice 的 base unit 是 `FreqSpacing / 2`
 - `EvenCountCenterToneMask = true` 的 even lattice 已经回到整数倍 `FreqSpacing`，因此 base unit 是 `FreqSpacing`
+- odd lattice 发生 LO 遮盖后，平移后的 multiplier 仍是整数倍 `FreqSpacing`，因此 base unit 不变；gcd 按平移后的 multiplier 计算，例如只保留 ±2 时变为 4
 - 再对 tone multiplier 取 gcd，得到真正的频率基本步长
 
 ### 6.3 Sample count solver
@@ -389,7 +412,7 @@ $$
 
 ## 7. 当前波形合成路线
 
-当前 htra multitone 先把 tone 解析并合并到离散 bin，再根据 `sampleCount` 选择原地 IFFT 或单遍直接时域合成。
+当前 htra multitone 先按最终 `sampleCount = N` 把 tone 解析并合并到离散 bin，再约简共同周期 `P`，根据 `P` 选择原地 IFFT 或单遍直接时域合成，最后重复填充 N 点 IQ。
 
 ### 7.1 Tone 落 bin
 
@@ -423,9 +446,21 @@ $$
 
 ### 7.3 时域恢复
 
-如果 `sampleCount` 恰好是 $2^n$，当前实现把合并后的 bin 写入唯一 `complex<double>` 工作区，并在该工作区内原地执行本地 IFFT。否则按 natural-bin 顺序执行一次通用逆变换求和，直接写入唯一完整时域工作区。
+对合并后的 natural bin `k_i`，先计算：
 
-两条路径之后都只对已经生成的时域工作区执行 DC 残差修正、metrics 统计和最终量化，不重新合成整段波形。完整数据驻留上限因此是一个 `complex<double>` 工作区加唯一最终 IQ payload；不会恢复旧的完整 frequency-domain + time-domain + IQ 三份数据，也不会以多遍重算换取内存。
+$$
+g = gcd(N, k_1, k_2, \ldots),\qquad P = N/g
+$$
+
+仅把内部合成列表的 bin 改为 `k_i/g`，外部 tone 的原始 bin、effective frequency、phase、频率误差和碰撞统计仍基于 N。因为 `k_i/N = (k_i/g)/P`，P 点构成原离散波形的一个共同周期；负频率使用 natural bin 同样成立。仅 DC 或 active tones 为空时自然退化为 P=1。合并后幅度恰为零的 bin 仍参与 gcd，不改变现有合并语义，最多只减少约简收益。
+
+唯一 `complex<double>` 工作区现在只分配 P 点：P 为 2 的幂时，在其中原地执行本地 IFFT，按 P 完成归一化与幅度恢复；否则按约简后的 natural-bin 顺序直接合成一个周期。两条路径随后都只对 P 点做目标感知 DC 修正、峰值/能量统计和量化，RMS 的分母使用 P。
+
+量化后的首个 P 点直接写入唯一最终 Builder 缓冲，再按已初始化的整周期前缀倍增复制到 N 点；每次 memcpy 最多 1024 个复样点并检查 generation revision，源/目标区间不重叠。最后仍通过原有 publishPayload 做 allocatedWordCount 的下载补齐，不增加第二份完整 IQ。
+
+主要驻留内存由原先 `4N+16N` 降为 `4N+16P` 字节（不计下载补齐和小型 tone/频谱数组）。相对于最终有效 IQ 的比例为 `1+4/g`，g 较大时才接近一份最终 payload；g=1 时 P=N，保留原完整合成路径。直接合成计算量变为约 `P*K'`，但最终 N 点缓冲的分配与填充仍为 O(N)。
+
+上述周期等价是数学结论；FFT 长度、递推长度及浮点求和顺序改变后，新旧 metrics/IQ 的数值容差仍需对照验证，不能仅凭数学等价保证所有参数下逐点误差不超过 1 LSB。当前实现仅完成静态核对。
 
 ### 7.4 目标感知去直流
 
@@ -436,10 +471,10 @@ $$
 - 若当前 active tones 合法包含中心 `0 Hz` tone，则保留该中心 tone 本应贡献的复常量分量。
 - 若当前 active tones 不包含合法中心 tone，则目标均值为 `0`。
 
-随后当前实现计算整段 waveform 的实际复均值，只减去相对该目标均值的残余：
+随后当前实现计算一个 P 点共同周期的实际复均值，只减去相对该目标均值的残余；重复周期的 N 点均值与其相同：
 
 $$
-\mu_{act} = \frac{1}{N}\sum_{n=0}^{N-1} x[n]
+\mu_{act} = \frac{1}{P}\sum_{n=0}^{P-1} x[n]
 $$
 
 $$
@@ -477,7 +512,7 @@ $$
 
 - 每次提交新的 generation plan，先递增 revision、清空旧 ready payload 并把 Save IQ Data 置为不可用。
 - worker 启动一轮计算时同时快照 profile、plan 和 revision。
-- 新请求到来后，旧 revision 会在直接合成、FFT、DC 修正、统计或量化的周期性取消点退出，不再等待整段旧波形自然算完。
+- 新请求到来后，旧 revision 会在直接合成、FFT、DC 修正、统计、量化或周期填充的取消点退出，不再等待整段旧波形自然算完。
 - 只有 revision 仍为最新且没有 pending profile 的结果可以提交；被取消的任务不发布部分 payload，也不发 ready/error 结果。
 - 析构同样先使当前 revision 失效，再等待 worker 退出，避免被大规模直接合成长时间拖住。
 
@@ -496,7 +531,7 @@ $$
 
 ### 8.1 当前并不是固定 RMS 输出
 
-当前 generator 在最终写出 int16 IQ 之前，会先在时域恢复后扣除相对目标均值的残余 DC，然后再遍历整段时域波形，计算：
+当前 generator 在最终写出 int16 IQ 之前，会先在时域恢复后扣除相对目标均值的残余 DC，然后遍历一个 P 点共同周期，计算：
 
 - `peakMagnitude`
 - `rmsMagnitude`
@@ -509,7 +544,7 @@ $$
 scale = \frac{32767}{componentPeak}
 $$
 
-然后再把缩放后的 I/Q 写成 int16 交织数据。
+然后把该周期缩放后的 I/Q 写成 int16 交织数据，重复填充为 N 点输出。
 
 ### 8.2 这为什么等价于 AutoScale
 
@@ -641,7 +676,7 @@ $$
 - `NotchWidth` 如何在逻辑 center 挖空，并在偶数 mask 模式下补偿 FixedPlayback center offset
 - 不论来自 notch 还是离散保留音，`0 tone` 都被定义为静默 playback waveform，而不是生成失败或空 payload
 
-只要 `EvenCountCenterToneMask` 保持默认关闭，且 VSG60 的目标参数语义与这里一致，两边就已经在 tone 集合层面对齐。若该临时开关打开，偶数 `Count` 的 tone 集会故意偏离 VSG60。
+只要 `EvenCountCenterToneMask` 关闭，且 VSG60 的目标参数语义与这里一致，两边就已经在 tone 集合层面对齐。该临时开关当前默认开启：偶数 `Count` 的基带 tone 集会故意偏离 VSG60；奇数 `Count` 在禁用中心音或使用陷波时，基带 IQ 也会平移（RF 频点经设备中心补偿后保持逻辑位置）。
 
 ### 10.2 Phase mode 语义对齐
 
@@ -682,7 +717,7 @@ VSG60 的导出结果往往更接近逻辑最小周期，而 SGStudio 当前更�
 
 ### 11.3 临时中心音遮盖模式会故意偏离 VSG60
 
-`EvenCountCenterToneMask` 打开后，偶数 `Count` 的 lattice 会整体偏移 `-(FreqSpacing / 2)`，让一根 tone 落到设备基带 DC。FixedPlayback 下还会临时把设备中心频率下发为 `logicalCenter + FreqSpacing / 2`，让最终 RF tone 位置重新对齐到用户逻辑中心附近。notch 选音会用相反的坐标补偿，继续围绕 `logicalCenter` 对称。这个行为用于临时遮盖中心频率本振泄露，不属于 VSG60 / SMA 对齐语义。
+`EvenCountCenterToneMask` 打开后，偶数 `Count` 的 lattice 会整体偏移 `-(FreqSpacing / 2)`，让一根 tone 落到设备基带 DC。FixedPlayback 下还会临时把设备中心频率下发为 `logicalCenter + FreqSpacing / 2`，让最终 RF tone 位置重新对齐到用户逻辑中心附近。notch 选音会用相反的坐标补偿，继续围绕 `logicalCenter` 对称。奇数 `Count` 在逻辑 0 Hz tone 不 active 时，会把基带跨度最小的 active tone 平移到 DC，设备中心改为 `logicalCenter + k_Δ · FreqSpacing`（见 §2.8）。这个行为用于临时遮盖中心频率本振泄露，不属于 VSG60 / SMA 对齐语义。
 
 ### 11.4 Random 不必与 VSG60 bit-exact 同 seed
 
@@ -731,8 +766,8 @@ VSG60 的导出结果往往更接近逻辑最小周期，而 SGStudio 当前更�
 当前 htra multitone 可以概括成下面这条主线：
 
 1. 先把 `Count` 收口到产品范围 `2..1024`，并把 `FreqSpacing` 收口到不低于 `1 kHz`；再用两者生成对称 baseband tone lattice。默认偶数 `Count` 使用 half-spacing lattice，不包含 DC。
-2. 若 generator profile 中的临时 `EvenCountCenterToneMask` 显式打开，偶数 `Count` 的 lattice 整体偏移 `-(FreqSpacing / 2)`，使一根 tone 落到 DC；该模式用于遮盖中心泄露，不属于 SMA / VSG60 对齐语义。
-3. 根据当前模式，要么用 `NotchWidth` 在逻辑 center 做 lattice-aware notch（偶数 mask 模式下先把基带频偏加上 `FreqSpacing / 2`），要么用 `EnabledToneIndices` 直接筛出离散保留音；两条路径都允许 active tones 为空，对应 silent IQ waveform。
+2. generator profile 中的临时 `EvenCountCenterToneMask` 默认开启。此时偶数 `Count` 的 lattice 整体偏移 `-(FreqSpacing / 2)`，使一根 tone 落到 DC；该模式用于遮盖中心泄露，不属于 SMA / VSG60 对齐语义。
+3. 根据当前模式，要么用 `NotchWidth` 在逻辑 center 做 lattice-aware notch（偶数 mask 模式下先把基带频偏加上 `FreqSpacing / 2`），要么用 `EnabledToneIndices` 直接筛出离散保留音；两条路径都允许 active tones 为空，对应 silent IQ waveform。奇数 mask 模式下，若逻辑 0 Hz tone 不 active，则把基带跨度最小的 active tone 平移到 DC，并把 `k_Δ · FreqSpacing` 作为生成结果的设备中心偏移。
 4. 用 `Fixed / Random / Parabolic` 定义每根 active tone 的相位；当 active tones 为空时，相位分配自然退化为空集。
 5. 先用
 
@@ -740,16 +775,16 @@ $$
 F_{s,lower} = clampSampleRate(1.25 \cdot 2 \cdot \max(|f_{min}|, |f_{max}|))
 $$
 
-建立采样率下限；对默认完整对称 lattice，它等价于 `1.25 * (Count - 1) * FreqSpacing`；对开启 `EvenCountCenterToneMask` 的完整偶数 lattice，它等价于 `1.25 * Count * FreqSpacing`。business 先尝试当前组合，优先选择 `fundamentalStep` 整数倍，也允许 current capacity 内可精确闭合的有理周期边界；无 plan 时保持 Count、优先降低 FreqSpacing，只有 1 kHz 仍不满足才降低 Count。
+建立采样率下限；对默认完整对称 lattice，它等价于 `1.25 * (Count - 1) * FreqSpacing`；对开启 `EvenCountCenterToneMask` 的完整偶数 lattice，它等价于 `1.25 * Count * FreqSpacing`。business 先尝试当前组合，优先选择 `fundamentalStep` 整数倍，也允许 current capacity 内可精确闭合的有理周期边界；无 plan 时保持 Count、优先降低 FreqSpacing（同时考虑奇数 LO 遮盖增加的跨度），只有 1 kHz 仍不满足才降低 Count。
 6. 先求最小 exact-period 周期，再把最终 `sampleCount` 选成满足 playback 最小段长和目标 RBW 的最小工程友好 exact-period 段。
-7. 先按 natural bin 合并同 bin tone；2 次幂点数在唯一工作区内原地 IFFT，非幂次点数一次直接合成到唯一时域工作区，然后按当前参数语义做目标感知的残余 DC 消除。
+7. 先按 N 点坐标的 natural bin 合并同 bin tone，再用 `gcd(N, bins)` 约简为 P 点共同周期。P 为 2 的幂时在唯一 P 点工作区原地 IFFT，否则直接合成 P 点，然后按当前参数语义做目标感知的残余 DC 消除；主要驻留内存为唯一最终 IQ 加 P 点浮点工作区，即约 `4N+16P` 字节。
 8. 按
 
 $$
 scale = \frac{32767}{\max(|I|, |Q|)}
 $$
 
-对整段做统一缩放并量化成 int16 IQ，这等价于默认开启 AutoScale。
+对周期做统一缩放并量化成 int16 IQ，再通过可取消的分块复制填充 N 点，这等价于默认开启 AutoScale。
 9. 用 512 点、单段、弱平滑的 analyzer 口径生成当前频谱预览；离散音表格按相对逻辑 center 的频偏从低到高展示，偶数 mask 模式只在表格显示层补回 `FreqSpacing / 2`，不改写实际 IQ 频偏。
 10. 异步生成按 generation revision 执行 cooperative cancellation；业务先使旧 revision 失效并禁用 Save IQ，再同步一次前端 table，只有最新 revision 可以进入 ready。
 

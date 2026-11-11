@@ -8,6 +8,7 @@
 补充：2026-08-19（ETH Connect 支持共享 IP 下 5000/5001 顺序独立尝试与部分成功保留）
 补充：2026-08-19（统一 Default/Last/重启/更新后的启动连接意图，并默认关闭启动 ETH 弹窗）
 补充：2026-08-20（ETH Connect 改为不可中途取消的异步模态流程，watchdog abort 等待真实回切终态）
+补充：2026-10-29（UID 配置保存/恢复仅用于同 IP 5000/5001 A/B 切换；普通连接/重连按当前 UI，不清理文件；静态实施，未构建/运行）
 
 本文用于后期维护与 Debug，描述当前工程中 HTRA 设备从“可枚举多设备”到“可在 UI 中切换当前设备（current device）”的完整设计、线程模型、关键流程与排障清单。
 
@@ -51,7 +52,7 @@ HTRA plugin 只有在该属性为 true 时才会尝试恢复上次成功的 manu
 
 成功连接时，`DeviceRuntimeBridge` 将最后成功传输和 ETH endpoint 写入 `Settings.ini`。USB 成功连接只更新传输类型为 USB，并保留上次 ETH 地址/端口供 ETH Connect 回填。启动恢复只尝试上次成功的一个 ETH 端口，不自动恢复共享机箱的另一个 A/B 端口。
 
-启动 ETH open 失败会注销临时 manual ETH；若随后发现 USB，fallback 仍通过 `runtimeFallbackSelectionRequested` 交给 `DeviceRuntimeProfileCoordinator` 恢复 USB UID profile。网络 ETH 没有 scanner 恢复路径，网络恢复后仍需用户通过 ETH Connect 手动重新创建。
+启动 ETH open 失败会注销临时 manual ETH；若随后发现 USB，fallback 仍通过 `runtimeFallbackSelectionRequested` 交给 `DeviceRuntimeProfileCoordinator` 协调切换，保留当前 UI 后 refresh，不读写 USB UID profile。网络 ETH 没有 scanner 恢复路径，网络恢复后仍需用户通过 ETH Connect 手动重新创建。
 
 启动 ETH 自动恢复不等于启动弹窗。`SGS_ENABLE_STARTUP_ETH_CONNECT_DIALOG` 是 Core 的编译选项，默认 `OFF`，只为特殊设备构建启用启动后的 ETH Connect 弹窗；默认构建不会弹窗。
 
@@ -213,10 +214,12 @@ sequenceDiagram
 - 任意已打开 USB/ETH 切到非空目标时都会保留旧 handle，使普通 Playback 继续由设备自主输出；Streaming 在切换前停止。
 - retained 设备不再是 current，不参与状态轮询，也不支持同时实时交互控制；显式断开和生命周期清理仍真实释放。
 
+UID 配置边界（2026-10-29）：仅本次 source/target 为同 IP、5000/5001 两端且 source 已 open 时，执行保存源配置、恢复/保存目标配置及失败回切恢复源配置；目标初次连接时可以尚未 open。普通单 ETH/USB 连接与重连、USB 切换、混合切换、不同 IP ETH 切换和重复选择当前设备都沿用当前 UI，不读写 UID 文件。退出保存也限定为当前 ETH 仍有已打开的 A/B 配对端。现有 device_profiles 不清理，合法 A/B 切换仍可读取遗留 UID 文件；全局 Profile.json / Default / Last State / User Preset 不变。见 [修复 TaskLog](../TaskLog/2026-10-29_fix-device-profile-ab-switch.md)。
+
 retained manual ETH 的 P0 防护：
 - manual ETH 没有 scanner 保活，非 current 设备的 `isOpen()` 只是最后一次本地缓存状态。远端断开后，旧 H2 handle 可能已经失效。
 - 当目标是“非 current、manual ETH、缓存为 open”时，`DeviceRuntimeProfileCoordinator` 先通过 `QProcess` 异步执行一次系统 ping。检查期间 `isSwitchInProgress()` 保持 true，Device List 和标题栏 A/B 不接受重复切换。
-- ping 成功后才进入既有的“保存源 UID profile → suspend pipeline → stop active business → switch current → restore 目标 UID profile”流程。
+- ping 成功后才进入既有的“suspend pipeline → stop active business → switch current → refresh”流程；仅同 IP 5000/5001 A/B 切换会在 suspend 前保存源 UID profile、open 成功后恢复目标 UID profile。
 - ping 失败、超时或进程启动失败时，current、源 profile、active business 和 pipeline 均保持不变，并统一显示一条“远端 ETH IP 不可达”消息（从 ETH Connect 发起时在连接对话框显示失败）；随后按共享机箱语义调用 `DeviceManager::unregisterManualEthGroup(ip, false)`，注销同 IP 下全部非 current 的 5000/5001 manual ETH，使它们从 Device List 和标题栏 A/B 投影中消失。下次必须由用户通过 `ETH Connect` 手动重新创建并打开。
 - reachability 失败不再向 UI 区分 ping 工具缺失、退出码、超时或目标在检查期间注销；日志保留具体原因。`includeCurrent=false` 仍保护当前设备，避免异步检查期间误删 current。
 - **能力边界**：ICMP 成功只能证明 IP 主机有响应，不能区分同一 IP 的 5000/5001 endpoint，也不能证明 H2 服务、session 或旧 handle 仍有效。它是防止明显失联目标进入旧句柄下发路径的 P0 fail-fast，不是完整健康检查。
@@ -246,7 +249,7 @@ retained manual ETH 的 P0 防护：
 - 对“运行中断开（原本已 open）”采用保守策略：**先注销、等重新发现、再重新连接**。
   - 目的：避免在已失效对象上持续 open，减少底层驱动不确定行为。
   - USB 由 scanner 重新发现；manual ETH 只能由用户重新连接。
-  - 任何 current 设备运行期注销后，如果 `DeviceManager` 选择 USB fallback，实际切换都通过 `runtimeFallbackSelectionRequested` 交给 `DeviceRuntimeProfileCoordinator`，在 pipeline suspension 内恢复目标 UID profile 后再 refresh，避免把断连设备的 UI 状态下发给 fallback 目标。
+  - 任何 current 设备运行期注销后，如果 `DeviceManager` 选择 USB fallback，实际切换都通过 `runtimeFallbackSelectionRequested` 交给 `DeviceRuntimeProfileCoordinator`，保留 pipeline suspension 与切换终态协议，按当前 UI refresh，不读取或保存 USB UID profile。
 
 ### 5.4 Open 失败 → 自动重试（不阻塞 UI）
 

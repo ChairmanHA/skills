@@ -130,8 +130,9 @@ LayerShellQt。LayerShellQt 只在 Wayland MiniBar helper 中启用；X11 下 he
 正式入口是归档内 `bin/<application>`。程序在创建 `QApplication` 前把 Qt plugin
 路径固定到当前包，并根据 `XDG_SESSION_TYPE`、Wayland socket、`DISPLAY` 和包内
 platform plugin 选择 `wayland` 或 `xcb`，因此不需要启动脚本注入
-`QT_QPA_PLATFORM`、`QT_PLUGIN_PATH` 或 `LD_LIBRARY_PATH`。归档根 launcher 仅保留为
-Raspberry Pi 兼容入口，不是共用产物的启动条件，也不应在 RK3588 上使用。
+`QT_QPA_PLATFORM`、`QT_PLUGIN_PATH` 或 `LD_LIBRARY_PATH`。2026-10-27 起，
+`build.sh raspberry-pi` 不再生成根目录 launch_sgstudio_pi.sh/launch_pi.sh，直接从
+桌面会话运行 `./bin/<application>`；构建树和 staging 的直接启动审计继续保留。
 
 ### 2.5 本机 VMware 来宾与批量入口（api2.0.36 / dev）
 
@@ -263,8 +264,8 @@ Qt 库找不到相邻的 ICU。`src/CMakeLists.txt` 用 `-Wl,--disable-new-dtags
 上安全执行 `ldd`，因此由 `readelf` 依赖闭包和目标机验收补齐。
 
 QPA 与 loader 是两个不同边界：`DT_RPATH` 解决 ELF 间接库，应用启动前 bootstrap
-解决 Qt plugin 路径和 Wayland/xcb 选择。两个 launcher 模板仍保留为兼容便利入口；
-它们不再是 `raspberry-pi` 归档的正确性前提。
+解决 Qt plugin 路径和 Wayland/xcb 选择。Ubuntu 目标仍附带 X11 launcher；
+`raspberry-pi` 归档不再生成根 launcher。
 
 ## 5. packet、language 与 archive
 
@@ -300,7 +301,7 @@ scripts/build_pi.sh   108 Raspberry Pi 原生
 | :--- | :--- |
 | `aarch64.cmake` | 250 AArch64 交叉 toolchain |
 | `gcc.cmake` | 250 x86_64 toolchain |
-| `launch_pi.sh` | 250 Raspberry Pi 兼容 launcher 模板；共用包正式入口仍为 `bin/<application>` |
+| `launch_pi.sh` | 历史 Raspberry Pi launcher 模板；build.sh 已不再引用或打入树莓派包 |
 | `launch_linux_x11.sh` | 250 Ubuntu 包 X11 launcher 模板 |
 | `install_pi_runtime_deps.sh` | Raspberry Pi 运行依赖准备 |
 | `audit_linux_package_ui_runtime.sh` | 独立归档/对比审计工具，不是构建入口 |

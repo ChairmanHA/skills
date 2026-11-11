@@ -78,8 +78,8 @@
 选择候选与执行切换是两个边界：
 
 - `preferredReconnectUsbKey == 0` 表示启动期首次自动选择，仍由 `DeviceManager` 直接设置 current，首台设备使用启动 UI seed。
-- `preferredReconnectUsbKey != 0` 表示运行期 USB 断连恢复。上述三个入口都只发出 `runtimeFallbackSelectionRequested(device)`，由 `DeviceRuntimeProfileCoordinator` 在 pipeline suspension 内切换 current、恢复目标 UID profile，再执行最终 refresh。
-- 运行期 fallback 不得直接调用 `setCurrentDevice()`；否则目标设备会先接收断连源设备残留在 UI 中的 profile，并可能在后续切换时把错误状态保存到目标 UID 文件。
+- `preferredReconnectUsbKey != 0` 表示运行期 USB 断连恢复。上述三个入口都只发出 `runtimeFallbackSelectionRequested(device)`，由 `DeviceRuntimeProfileCoordinator` 在 pipeline suspension 内切换 current，保留当前 UI 并执行最终 refresh。
+- 2026-10-29：UID 文件保存/恢复已限定于同 IP 5000/5001 的双 ETH A/B 切换；USB fallback、单 ETH/USB 重连等普通路径不读写 device_profiles。运行期 fallback 仍通过协调器，以保留 pipeline suspension、业务停止和切换终态协议。现有文件不清理；本次修复仅静态核对，未构建/运行。见 [修复 TaskLog](../TaskLog/2026-10-29_fix-device-profile-ab-switch.md)。
 
 ### 2.4 跨进程 owner 状态：`src/libs/utils/instancestateregistry.*`
 

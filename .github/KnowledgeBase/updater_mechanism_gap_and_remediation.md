@@ -43,7 +43,7 @@ maintenance 只在 updater `NormalExit && exitCode == 0` 时继续后续动作�
 
 `CopyThread` 当前固定复制回原 `destPath`，不再因为包根目录名创建新的安装根。这避免 desktop entry、快捷方式、部署脚本中的绝对路径在更新后失效。
 
-Windows 整目录备份前，maintenance 会通过 Shell COM 只关闭当前路径位于安装根或其子目录内的 Explorer 窗口，避免这些窗口的目录句柄阻止 `destPath -> _bak`。它不会终止桌面 Shell 或关闭其他位置的 Explorer 窗口，后续仍使用存活的 Explorer 以非管理员身份重启 SGStudio。
+2026-10-30 已静态实施并按用户要求简化固件前预检：需要软件替换时，主程序退出后 maintenance 先尝试安装根改名并立即还原，两步成功才启动首个固件目标。Windows 的 Explorer 定向关闭移至探针前；失败仅提示用户关闭可能打开内部文件的程序，只有确认按钮，随后结束本次更新。还原失败则额外显示文件实际所在路径。已删除 Restart Manager、诊断线程、内置重试和额外系统调用。Local Default 完全绕过检查和文件替换；不终止桌面 Shell 或强杀编辑器。尚未编译及运行验收，详见当前实现文档 4.2 节。
 
 ### 授权文件保留
 

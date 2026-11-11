@@ -92,7 +92,7 @@ Hop/Sweep 可用性由 `CommonDeviceProfile` 的输出源属性回调统一更�
 
 - 表示当前 HTRA 射频本振工作模式。
 - 表示当前射频输出端口。
-- `Low Power` 是独立设备开关：ON 映射 H2 `POWEROFF`，OFF 映射 `POWERON`。
+- `Low Power` 是独立的 RF 联动节能策略：ON 时在 Mute 配置末尾请求 H2 `POWER_OFF`，非 Mute 配置请求 `POWER_ON`；OFF 时保持上电配置路径。
 
 ### 3.5 Fan Control
 
@@ -271,11 +271,13 @@ H2 API 已修复此前 `recounter = 10` 可能令设备会话失效的问题，�
 
 ### 6.5 Low Power 的当前实现
 
-`FancyDevice::open()` 使用现有的 PGA 单口供电判据 `Plugin::usbPortOnly()` 设置每次 open 的 Low Power 策略默认值，但硬件 open 初始化统一先进入 `POWERON`：
+`FancyDevice::open()` 使用 `Plugin::hasHlcService()` 设置每次实际 open 的 Low Power 策略默认值，但硬件 open 初始化统一先请求 `POWERON`：
 
 - 所有设备：open 阶段先调用 `device_config_power_state(..., POWERON)`，并保证随后第一次公共配置无条件执行一次 `tx_config_ffm()`。
-- `PGA_PowerSourceType == 1`：Low Power 策略缓存与 UI 默认显示 ON；首次 Mute 配置完成后再进入 `POWEROFF`。
-- 其他设备：Low Power 策略缓存与 UI 默认显示 OFF，后续保持 `POWERON`。
+- HLC 可用：Low Power 策略缓存与 UI 默认显示 ON；首次 Mute 配置完成后再进入 `POWEROFF`。HLC 可用指启动时的 `hlc --device-kernel-info-all` 正常退出且返回 0，不要求供电字段存在或值为 1，不限定 USB/ETH。
+- 无 HLC 或查询失败：Low Power 策略缓存与 UI 默认显示 OFF，后续保持 `POWERON`。
+
+2026-10-29 用户进一步明确旧单口供电平板仍需兼容：恢复保留 `usbPortOnly` 及正常 USB open、零身份探测中的两处 `device_ignore_pd()` 分支。`usbPortOnly` 仍由 `PGA_PowerSourceType == 1` 决定，但菜单隐藏、Low Power 默认 ON 和电池显示统一仅依据 HLC 可用性，不读取单口标志或供电字段是否存在。仅静态实施，新旧硬件启动/连接及低功耗行为待设备验收。
 
 H2 API 当前没有 power-state query，因此 `queryLowPowerEnabled()` 返回本次设备 open 或最近一次成功编辑的策略缓存值。页面点击后调用 `configureLowPowerEnabled()` 更新策略；ON/OFF 分别映射后续 Mute/非 Mute 配置中的 `POWEROFF` / `POWERON`，失败时回退显示缓存值。
 

@@ -6,6 +6,8 @@
 > - **“按当前 UI business 去配置设备”这个意图是成立的**：配置入口在 `IBusiness::startBusiness()/onDeviceProfileChanged()`，最终调用到 `IDevice::configuration()`。
 > - `BusinessManager` 先同步消费 `currentDeviceCapabilitiesChanged(...)`，完成全部 business reconcile；随后 `currentDeviceOpenStateChanged(bool)` 才负责 start/stop。
 
+2026-10-29 补充（静态实施，未构建/运行）：`device_profiles` 仅用于同 IP、5000/5001 的双 ETH A/B 切换。协调器按本次 source/target 判定，切走前保存已打开 source，目标 open 后恢复/保存其 UID 配置；B 初次连接时不要求它已 open。单 ETH/USB 重连、USB 切换、混合切换、不同 IP ETH 和重复选择当前设备均保留当前 UI，不读写 UID 文件；退出只对仍有已打开 A/B 配对端的当前 ETH 保存。现有文件不清理，全局启动配置规则不变。见 [修复 TaskLog](../TaskLog/2026-10-29_fix-device-profile-ab-switch.md)。
+
 ---
 
 ## 1. 参与角色（谁负责什么）
@@ -65,7 +67,7 @@
   - 立即发布新的 unavailable capability revision，再 `emit currentDeviceOpenStateChanged(false);`
   - I/O worker open 成功后，`FancyDevice` 先调用 `device_query_options()`；`OPTION_BW_320M_TX` 决定 Playback 为125 MSPS/125 MiB基线，或200 MSPS连续档 + 400 MSPS单点/1000 MiB扩展档
   - `device_query_options()` 失败时记录 warning 并使用保守基线，不按 model 推测扩展能力
-  - `FancyDevice` 随后无条件请求一次 `device_config_power_state(..., POWERON)`，保证 open 初始化和首次 FFM 配置发生在上电状态；Low Power 仍是独立的 RF 联动策略缓存，PGA 单口供电设备默认策略为 ON，其他设备默认策略为 OFF
+  - `FancyDevice` 随后无条件请求一次 `device_config_power_state(..., POWERON)`，保证 open 初始化和首次 FFM 配置发生在上电状态；Low Power 仍是独立的 RF 联动策略缓存。2026-10-29 起，启动 HLC 查询正常返回的主机默认策略为 ON，USB/ETH 均适用；无 HLC 或查询失败时默认 OFF，不再依赖单口供电字段
   - open 成功后第一次公共设备配置无条件调用 `tx_config_ffm()`；后续配置先 `tx_query_ffm()`，仅当 center/level 与目标不一致或 query 失败时才重新调用 `tx_config_ffm()`
   - 随后发布最终 capability revision 并同步完成 business reconcile
   - 最后 `emit currentDeviceOpenStateChanged(true);`
@@ -255,7 +257,7 @@ Analog 插件当前已经明确把两阶段拆成两种语义：
     └─ DeviceManagerPrivate::onDevicesDiscovered()：快照对账（add/remove）
        ├─ 启动期首选 → DeviceManager::setCurrentDevice(device)
        └─ 运行期 USB fallback → runtimeFallbackSelectionRequested(device)
-          └─ DeviceRuntimeProfileCoordinator：suspend → setCurrentDevice → restore target UID profile → refresh
+          └─ DeviceRuntimeProfileCoordinator：suspend → setCurrentDevice → 保留当前 UI → refresh（USB fallback 不读写 UID profile）
          ├─ target non-null → retain old open；target null → close old
          ├─ new closed → open
          ├─ publish unavailable capability revision

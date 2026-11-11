@@ -112,7 +112,7 @@ bash scripts/build.sh raspberry-pi standard cn SGStudio --watermark off
   plugin、业务 plugin 与供应商库的应用级间接依赖复制进 `lib/`；glibc、
   `libstdc++`、GL/EGL/DRM/GBM、`libwayland-*` 仍由目标系统提供，边界说明见
   [250 交叉构建与 108 运行兼容性](raspberry_pi_132_build_host_250_compatibility.md)；
-- 三种产物都带根 launcher，并通过 launcher 建立包内 Qt/runtime 环境。
+- 三种产物都支持直接运行 `bin/<application>`；Ubuntu 两目标保留根 X11 launcher，raspberry-pi 不再生成根启动脚本，继续检查包内 RPATH 与相对 qt.conf。
 
 输出：
 
@@ -217,6 +217,27 @@ online=...
 源码配置和 build tree 配置不被修改；最终 staging 缺文件或仍残留这些键时，脚本
 应失败而不是生成误配置归档。
 
+### 6.2 Windows 与 Linux build.sh 水印测试包
+
+2026-10-27 起，`build.bat` 和 `build.sh` 在最终 CMakeCache 中 `SGS_ENABLE_INTERNAL_WATERMARK:BOOL=ON` 时附带测试套件；Windows 未传开关而沿用增量 cache 的 ON 同样包含，OFF 不增加测试目录。沿用原 staging 清理流程，不复制 Python/.venv 或 images 历史结果。Linux 三目标采用相同目录布局，`build_pi.sh` 原生入口本次不变。
+
+```text
+<archive_name>/
+  bin/
+  QuickWaveFormData/
+  testcases/                   # 仓库根同名目录递归复制，含 assets
+  scripts/
+    test_scpi_gui_baseline.py
+    test_scpi_foundation.py
+    README_scpi_gui_baseline.md
+```
+
+测试目录/脚本复制失败会终止打包。G-2 Playback 与 M-1 Streaming 共用 testcases/assets 的原 WAV，配置内相对资源路径以各自 JSON 所在目录为基准；其他外部绝对资源路径继续有效但须自行准备。Quick Waveform 固定按包根 QuickWaveFormData 定位，配置不能覆盖为开发机根路径。
+
+启用包内 SCPI 后，在解压包根目录执行 `python scripts/test_scpi_gui_baseline.py --basic-only`；Linux/树莓派使用 `python3`。本机已有 Python 3.12.13，其他机器须准备可用 Python，仅依赖标准库，无需开发目录或 .venv。完整使用说明随包附带；本轮仅静态核对，未运行构建/打包/设备测试。
+
+在 x86_64 构建机执行 `bash scripts/build.sh raspberry-pi standard cn SGStudio --watermark on`，输出 `build/linux_raspberry_pi_cross_aarch64/standard/cn/SGStudio.tar.gz`。树莓派解压、启动程序并连接设备后，可用 `python3 scripts/test_scpi_gui_baseline.py --basic-only --scenario files` 只测文件/流，或 `--scenario rms` 只测 G6～G9。M-2 使用 `assets/WLAN_30MHz.wav`、30 MS/s，单次加载等待 2 s 后截图；测试套件路径、截图/报告和 A/B 临时文件位置与 Windows 一致。
+
 ## 7. 缓存边界
 
 - `build.bat` 默认增量，只有 `--rebuild` 清理整个 Windows build tree。
@@ -243,7 +264,7 @@ online=...
 
 差异：
 
-- 250 的 `build.sh` 包在根目录额外生成 launcher，必须用 launcher 启动；
+- 250 的 `build.sh raspberry-pi` 包不再生成根 launcher，直接运行 `bin/<application>`；Ubuntu 两目标保留根 X11 launcher，也支持直接运行程序；
 - 108 的 `build_pi.sh` 原生包没有根 launcher，直接运行 `bin/<application>`。
 
 不同 target 的 `bin/lib/plugin` 不能拼装或相互覆盖。
@@ -253,7 +274,7 @@ online=...
 1. 确认使用了正确入口、target 和 package 输出目录。
 2. 查看构建开头的 host architecture、compiler target、Qt prefix 与桌面后端。
 3. 查看打包前 audit 是否通过。
-4. 250 包从根 launcher 前台启动；108 原生包从 `bin/<application>` 启动。
+4. 树莓派交叉包和 108 原生包在桌面会话直接运行 `bin/<application>`；250 的 Ubuntu 包也可用根 X11 launcher。
 5. 先看终端 loader/Qt plugin 输出，再看 `bin/debug.log`。
 6. `GLIBC_* not found` 是 ABI 问题，不要用复制 glibc 的方式修复。
 7. Wayland 问题先检查桌面用户、`XDG_RUNTIME_DIR` 和 `WAYLAND_DISPLAY`。

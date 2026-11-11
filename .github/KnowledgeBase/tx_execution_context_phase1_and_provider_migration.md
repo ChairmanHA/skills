@@ -291,6 +291,9 @@ core-managed 的 `TxSessionService::appliedRequest()` 是已吸收设备确认 L
    - `RF.editingFinished -> requestRefresh()`
    - `MOD.editingFinished -> requestRefresh()`
    - `CommonDeviceProfile::profileChanged -> requestRefresh()`
+   - 标题栏每次点击 `Single`，在更新 `TriggerCount=1` 后调用 `requestSingleExecution()`；首次与重复点击使用同一显式执行意图
+   - 显式意图随下一次快照消费；当快照仍为 `triggerCount==1` 时，core-managed 路径向 runtime 传入 `forceExecution=true`，不再按 Fixed/Sweep 筛选，绕过相同配置去重。普通 `requestRefresh()` 保留去重；期间切回 Continue 则不强制执行旧 Single 意图
+   - runtime 沿用串行 I/O 和单条 pending-latest，不按快速点击次数累计播放轮数；apply 完成表示配置和启动调用完成，不表示波形已经播完。External/XPPS 的 arm 与触发源规则保持不变
 
 3. `MainWindow` 仍负责注入 UI 专属状态
    - `syncTxSessionState()` 写入 selected business / carrier plan

@@ -233,13 +233,11 @@ scratch workspace，必须跳过缓存交接。启动成功后主程序等待 ma
 3. 如果父进程未退出，执行一次强制终止：
    - Windows：`taskkill /PID <pid> /F /T`
    - Linux：`kill(pid, SIGKILL)`
-4. 2 秒后启动 updater，并实时展示 stdout/stderr。
+4. 2 秒后进入固件前预检入口：Local Default 直接启动 updater；整包更新先执行安装根改名/还原探针，Windows 在探针前定向关闭安装树内 Explorer 窗口。失败只弹出确认提示并结束本次更新，用户自行关闭相关程序后重新发起。探针通过后才启动 updater，并实时展示 stdout/stderr。
 5. updater 结束后检查结果：
    - 只有 `NormalExit && exitCode == 0` 才继续。
    - 失败时停留在 maintenance 界面，不复制目录、不自动重启。
-6. 如果参数中带有复制源/目标：
-   - Windows 先通过 `IShellWindows` 关闭当前路径位于安装根或其子目录内的 Explorer 窗口，释放目录句柄；不会终止桌面 Shell 或无关 Explorer 窗口。
-   - 然后进入 `CopyThread`。
+6. 如果参数中带有复制源/目标，进入 `CopyThread`；不再进行额外预检或再次关闭 Explorer。
 7. `Local Default` 不带复制源/目标，因此不会关闭 Explorer 窗口、不会创建 `CopyThread`，
    固件 updater 成功后直接从当前 `bin/` 查找应用。
 8. 复制成功或 Local Default 固件更新成功后，带 `--UpdateCompleted` 重启；Windows 只通过 Explorer shell 以非管理员身份启动，失败时停留在错误界面，不回退为 maintenance 的管理员身份；新进程随后接管适用的 handoff 缓存。
@@ -247,15 +245,20 @@ scratch workspace，必须跳过缓存交接。启动成功后主程序等待 ma
 
 强杀兜底成功后不再做额外二次等待。这个分支的语义是“父进程已无法在合理时间内正常退出，maintenance 继续接管后续更新事务”。
 
-### 4.1 Win32 外部文件占用隐患
+### 4.1 Win32 外部文件占用与现场备份失败
 
-当前 Windows 关闭逻辑只通过 `IShellWindows` 定向关闭安装根或其子目录中的 Explorer
-窗口。它不会检测或关闭 Excel、文本编辑器、IDE 等打开安装目录文件的外部用户程序；
-maintenance 具备管理员权限也不代表能够绕过这些程序创建的 Windows 文件共享限制。
+整改前 Windows 只通过 `IShellWindows` 定向关闭安装根或其子目录中的 Explorer 窗口，
+不检测外部编辑器。当前代码已按 4.2 节接入固件前探针和单按钮失败提示（仅静态核对，待运行验收）。
+maintenance 具备管理员权限也不代表能够绕过外部程序创建的 Windows 文件共享限制。
 
-这是一个尚未由现场故障证实、当前不主动增加处理代码的隐患。以
-`configuration/Language.xlsx` 和 `configuration/Settings.ini` 为例，外部程序持续持有文件
-句柄时，可能分别影响下面三个阶段：
+2026-10-30 用户报告：用记事本打开 `configuration/Settings.ini` 时可能触发该故障。
+现场日志显示关闭两个 Explorer 窗口后，`SGStudio -> SGStudio_bak` 重命名失败，随后
+`Package copy failed. Application restart was skipped.`。日志与整改前复制路径吻合，失败发生在
+新包复制之前；本次软件安装根尚未由 CopyThread 改动，但固件 updater 已报告成功。
+“Windows 最近更新改变了记事本行为”仍是待核实的原因假设，尚无具体版本、句柄或系统错误码证据。
+
+以 `configuration/Language.xlsx` 和 `configuration/Settings.ini` 为例，外部程序持续持有文件
+或目录句柄时，可能影响下面三个阶段，具体取决于操作与句柄共享模式：
 
 1. 安装根重命名为 `_bak`；当前只重试三次，每次间隔 1 秒。
 2. 从备份回灌 `Settings.ini` 等运行时文件。
@@ -264,15 +267,69 @@ maintenance 具备管理员权限也不代表能够绕过这些程序创建的 W
 由于设备固件更新当前发生在软件目录重命名之前，这类占用如果在复制阶段才暴露，可能形成
 “设备固件已更新、软件包未完整替换”的部分更新状态。
 
-如果后续现场复现该问题，优先方案不是默认强杀外部程序，而是在启动设备固件 updater 之前：
+基于此次现场报告，用户将当前整改范围收敛为 4.2 节的“固件前单次目录探针 + 失败后仅确认提示”
+（已静态实施，未编译/运行）。暂不考虑 updater 运行期间用户重新打开/修改文件，不增加运行中监控、
+固件后再次探查或软件阶段重试。前置门控只应用于带软件复制参数的更新。
 
-1. 检测并列出占用安装文件的 Excel、编辑器等外部用户程序。
-2. 明确要求用户保存并关闭这些程序。
-3. 重新检测；占用未释放时停止本次更新，不进入固件更新和软件复制。
+现有复制/回灌/备份清理均以 bool 报告结果，回滚返回值未完整检查等问题仍存在；这些是前次
+分析记录的后续改进项，不纳入本次预检设计。
+
+预检和正式复制使用 `QDir::rename`，日志保留失败路径；“占用或无权”是通用提示，并非系统确诊。
+按用户要求，不查询占用进程或读取原生错误码，用户自行排查打开的内部文件。
+
+参考：[Windows 文件共享模式](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-createfilew)、
+[目录重命名规则](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/ntifs/ns-ntifs-_file_rename_information)。
 
 不应默认强制终止 Excel 或编辑器。一个进程可能同时承载其他无关且未保存的文档，管理员权限
 只能允许结束进程，不能保证第三方程序替用户保存数据。只有未来出现明确产品决策和交互确认时，
 才重新评估是否提供显式的强制关闭选项。
+
+### 4.2 固件前单次预检（2026-10-30，已简化，待运行验收）
+
+用户已将交互简化为单次探针失败后仅确认提示，不查询占用者、不提供内置重试。
+此前 Restart Manager、诊断线程、恢复状态和额外平台调用已移除。
+
+| 来源 | 软件替换 | 固件前目录预检 |
+| --- | --- | --- |
+| Local Default（安装内置 updater/固件） | 无 | 跳过 |
+| Local File（用户选择离线归档） | 有 | 执行 |
+| Latest Online（下载包） | 有 | 执行 |
+
+沿用 `m_needCopyFile` 和已有 maintenance 参数。主程序退出后，整包更新由解压包内的 maintenance
+执行预检；maintenance 的 cwd 在 main.cpp 中切至 home。安装根与包源、maintenance、固件 updater
+及 cwd 的路径关系在探针前检查，避免移动自身依赖。
+
+运行中的 SGStudio 不能假定允许安装根改名：Windows 的进程 cwd 可锁住目录；开启
+`Debug/LogToFile` 后，FileLogger 还会持续打开 `bin/debug.log`，直到析构才关闭。
+这与“安装树外的 maintenance 正在运行”是两回事。因此保持先退出主程序再探查。
+Windows 在探针前保留既有 `IShellWindows` 定向关闭安装根及子目录 Explorer 窗口的操作，
+不终止桌面 Shell，也不关闭无关窗口；不能据此保证所有编辑器或目录句柄都已释放。
+Linux 普通打开文件通常不阻止 rename，不关闭文件管理器或扫描进程。
+
+流程：
+
+1. Local Default 直接启动固件，完全跳过文件探针与 Explorer 关闭。
+2. 整包更新复用 `CopyThread::makeBackupPath` 选择空闲的 `_bak` … `_bak9`，跳过已被文件、目录或悬空链接占用的名称。
+3. Windows 定向关闭安装树内 Explorer 窗口后，两端均用 `QDir::rename()` 执行
+   `installRoot -> backupPath -> installRoot`，立即还原，不在两次操作之间处理事件。
+4. 两步成功才启动首个固件 updater。后续目标、固件结束后都不再探查。
+5. 首次改名失败：日志保留路径，弹窗提示用户关闭可能打开安装目录内部文件的程序后再试；
+   仅有 OK（确认）按钮。确认后关闭 maintenance、终止本次更新，不启动固件或自动重启主程序。
+6. 还原失败：同样只有确认按钮，明确显示文件实际所在的备份路径及应恢复的原路径，要求人工恢复；
+   不启动固件，不删除备份、不提供恢复重试状态。
+7. 正常安装继续沿用既有 CopyThread 备份/复制/回灌流程。
+
+预检与复制共用 Qt 目录改名语义，不增加 Rstrtmgr、renameat2 或 Linux 进程扫描依赖。
+不存在配置开关、诊断线程、自动重试和跨重启恢复记录。
+此次目录探针仅判断当前目录操作结果，不宣称覆盖权限、空间等全部后续复制故障。
+
+源码静态检查已完成，未构建或实际运行更新器。一次隔离 Windows 辅助进程重命名验证被工具自动审批
+以 `blocked by policy` 拒绝，未执行；因此不把“运行中的任意程序一定能改目录名”作为实测结论。
+后续验收包括 Windows 编辑器占用失败的单按钮提示、Linux 正常通过、Local Default 豁免、
+已有备份保留及还原失败提示实际路径。
+
+依据：[Windows cwd 锁定规则](https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-setcurrentdirectory)、
+[Linux rename(2)](https://man7.org/linux/man-pages/man2/rename.2.html)。
 
 ---
 
@@ -377,5 +434,5 @@ maintenance 具备管理员权限也不代表能够绕过这些程序创建的 W
 - 更新包下载链路仍需恢复 TLS 校验、移除明文认证信息，并补充 hash / 签名校验。
 - 包验证仍偏宽，`updater.exe` / `updater` 与 maintenance 的可执行性仍需要更严格校验。
 - 当前复制仍依赖手写回灌清单，尚未建立 manifest / package ownership。
-- Win32 当前只定向关闭 Explorer 窗口，未检测 Excel、编辑器等外部程序对安装文件的占用；在现场复现前保留为已知隐患，复现后按 4.1 节在固件更新前增加“检测、列出、要求用户保存关闭、重新检测”的门控。
+- 4.2 节已简化为跨平台固件前单次 Qt 目录探针、单按钮失败提示及 Local Default 豁免，尚未编译及现场验收；不含占用者查询、内置重试或固件后额外探查。
 - post-update 已收敛为 `--UpdateCompleted -> ReleaseNotesDialog` 唯一活跃路径；未接入且没有 writer 的 `UpdatePostSession` / `PostUpdateDialog` 支撑链路已删除。除此之外，`--UpdateCompleted` 会参与启动连接意图计算：若上次成功传输为 ETH，更新后的新进程会尝试恢复上次 ETH endpoint；失败时清理临时 manual ETH，并允许 USB fallback。该行为只恢复连接，不等价于保留完整的 `Profile.json`。

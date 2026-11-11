@@ -124,6 +124,8 @@ UI(StreamingPanel) ──(PropertySystem属性值变更/编辑结束)──▶ S
 
 - UI：Load/Unload/Remove/拖拽排序会 `fileListProperty->setValue(QStringList)`，并**显式 `emit fileListProperty->editingFinished()`**（用于触发业务侧重配置）。
 - UI：属性 `valueChanged` 会触发 `onFileListPropertyChanged()`，用于刷新列表与统计信息。
+- 文件拖放（2026-10-26，静态核对）：`StreamingFileTable` 自行处理 `startDrag/dropEvent`，以行间插入位置发出 `fileMoveRequested(sourceRow, destinationRow)`；`StreamingPanel` 在权威 `Streaming_FileList` 上按行索引移动，再通过属性刷新重建文件名/点数/采样率三列。不要依赖 `QTableWidget::InternalMove` 的默认单元格搬移或模型 `rowsMoved`；默认搬移不能保证完整行排序，且拖放结束后的源项清理可能再次破坏已刷新的内容。
+- 只有最终路径列表发生变化时，拖放才提交一次 `editingFinished`；取消、原位拖放和交换相同路径且列表值不变时不触发重配置。拖动期间列表重建会使源 `QPersistentModelIndex` 失效，该次拖放被取消。
 - Business：监听 `fileListProperty->editingFinished`：
   - **必须先** `streamingDataGenerator->setFileList(...)`，再 `m_profileChanged=true`。
     - 原因：sender 线程会在看到 `m_profileChanged` 后立刻调用 `streamingDataGenerator->toProfile()` 读取 `fileList` 并决定设备模式（空=Mute，非空=Stream）。
@@ -392,10 +394,11 @@ Generator 内部常量：
 
 ### 11.2 播放中拖拽排序/移除文件
 
-- UI 更新 property 并发 `editingFinished`。
+- UI 在最终列表确实改变时更新 property 并发 `editingFinished`。
 - business 标记 profileChanged 并更新 generator。
 - generator interrupt → 清空队列、停止当前生成循环 → 重新按新 fileList 生成。
 - sender 重配设备（仍是 STREAM，但会重置统计）。
+- 重排后 `openStreamSources(currentFileList)` 按新列表顺序建立数据源，普通逐帧路径和小文件 replay cache 都使用新建的 `StreamCursor`，因此从新列表第一个有效文件的起点重新生成并循环下发。该行为不是保留原文件播放位置的热重排；软件队列清空也不代表已进入设备的帧在拖放瞬间撤回。此处为静态链路核对，GUI/设备切换时序仍待运行验收。
 
 ---
 

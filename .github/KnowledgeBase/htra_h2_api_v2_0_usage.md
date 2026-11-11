@@ -2,7 +2,11 @@
 
 本文档面向本仓库当前集成的 HTRA H2 API，即 `3rdParty/h2_api/include/h2_api.h` 与 `3rdParty/h2_api/include/h2_typedef.h` 中定义的 API v2.0.34。本文不只解释“怎么调函数”，还要说明这些函数组合背后的业务语义，以及软件为什么必须围绕 API 能力而不是围绕页面名字设计。
 
+2026-11-05 Level 参考面接入准备：当前 tx_config/query_ffm、fscan、lscan、mscan 的功率字段保持端口 dBm（LevelStep 为 dB 差值），下发和回写均不叠加外部路径 Offset。SDK 头文件未发现独立 TX LevelOffset 设置接口；软件改 O 仅改变显示/输入参考面，不要求新增设备配置。Main/Minibar 端口 IPC 与 SCPI Offset 已静态实施，未进行构建/设备联调；API 参数、RMS 意图、夹值/失败回写及后续 SCPI Offset 的审计与联调清单见 [统一参考面设计](level_reference_plane_port_ipc_and_api_integration.md#4-设备-api-下发与回写的接入边界)。
+
 核心原则只有一句话：软件是 API 能力的展示层，不是另起一套真相源。UI、business、provider、runtime、orchestrator，都应该是对 API 能力边界的组织、约束和可视化，而不是脱离 API 再造概念。
+
+API返回码与独立输出字段必须分别保留，不根据输出值合成、替换或撤销SDK告警。例如`device_query_clock`返回18、`is_locked_o=0`时只记录18，不能补报15；返回15、`is_locked_o=1`时也不能因已锁而抹除15。业务恢复策略与API观测分开，不能改写观测结果。2026-11-09修复及同类审查见[TaskLog](../TaskLog/2026-11-09_preserve-h2-api-warning-status.md)。
 
 > 约定：本文默认以单个 TX 通道 `ch[0]` 为例。多通道场景可把相同配置按 `channel[]` 数组批量作用到多个通道。
 
@@ -241,7 +245,7 @@
   - `TRIGGER_SOURCE_EXTERNAL_RISING_EDGE`
   - `TRIGGER_SOURCE_EXTERNAL_FALLING_EDGE`
   - `TRIGGER_SOURCE_XPPS`
-- `response_count`：响应触发的次数，`-1` 表示无限次。
+- `response_count`：头文件注释为“响应触发的次数”，`-1` 表示无限次。该注释未明确计数范围，不能仅凭 `1` 推导所有模式都会在接收第一个脉冲后永久停止响应；XPPS + Sweep + Single 的已确认行为见 13.4。
 - `ch_action`：通过 `channel_config_trigger()` 配置每次触发时通道做什么。
   - `TRIGGER_ACTION_HOP`：前进一步。
   - `TRIGGER_ACTION_SWEEP`：执行一次完整列表或完整扫描。
@@ -762,6 +766,15 @@ UI 层更稳妥的做法不是在下发阶段偷偷改写 XPPS 参数，而是�
 
 一旦 XPPS 因失锁或 `pps_en = 0` 变为不可用，SGStudio 的公共 TriggerSource 会默认退化到 `BUS`，以保证后续 apply / reapply 仍有一个内部可执行的触发源；当 GNSS 恢复时不会自动切回 XPPS。
 
+#### XPPS + Sweep + Single 的确认语义（2026-10-29）
+
+证据来源：用户现场观察，并向 API 方确认该组合的行为正确。每个 XPPS 脉冲执行完整一轮扫描，单轮结束后等待下一脉冲；下一脉冲到来会再次执行一轮，无需每轮重新点击 Single。该场景不能判为“Single 失效”或要求第一个脉冲后永久停止响应。
+
+设 XPPS 频率为 `f`、周期为 `T = 1/f`，单轮扫描耗时为 `t < T`：相邻两轮的启动间隔约为 `T`，扫完后的等待时间约为 `T - t`。例如 1 Hz 时启动间隔约 1 s、等待约 `1 s - t`；2 Hz 时分别为 0.5 s 和 `0.5 s - t`。等待结束由下一次触发驱动，不是软件超时自动恢复。
+
+SGStudio 点击 Single 时仍设置 `TriggerCount = 1`，设备层把次数写入 `stream_trigger.response_count`。此前仅凭头文件“响应有限个触发后停止响应”的注释推导“只响应第一个 XPPS 脉冲”的判断已撤回；这里记录 API 方确认的场景行为，不据此重定义其他模式的计数规则。扫描耗时达到或超过触发周期时的脉冲处理策略，本次未确认。
+
+用户另已实测：拔掉 GNSS 天线导致失锁、关闭 XPPS Out 均会自动回退 BUS。
 ### 13.5 供电、风扇与通道硬件公共设置
 
 相关 API：

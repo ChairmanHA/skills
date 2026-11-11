@@ -123,9 +123,13 @@
 - 这里的单位不是单纯倍率换算，而是带阻抗假设的偏移换算。
 - 因此功率主输入不能和功率步长共用同一个适配器。
 
+2026-11-05 Level Offset 参考面重构：从 Core 私有实现提取至 Business 的 `ReferencedPowerUnitAdapter` 继承 `PowerUnitAdapter`，工厂类型由 Business 的 `ReferencedPowerUnitType` 常量声明。内部 realValue、validator 和步进均为端口 dBm，只有文本按创建时的 Offset 快照转换；共享 adapter 提供唯一纯加减规则；Main 的 `PowerReferencePlane` 继续持有设置并委托转换，libs 不读取 Core 状态。Offset 变化通过 `UnitAdapterFactory::contextChanged(type)` 刷新 NumericProperty 的 displayText，不触发 valueChanged，也不改变已打开键盘的快照。键盘创建逻辑按 PowerUnitAdapter 类型族识别功率，可编辑步长始终用 PowerStep。主界面 Level/RMS、Sweep、MScan 和批量编辑已切换；SCPI 用户协议在入口/查询转换；Minibar 协议 2、乐观状态和完整请求均为端口值，helper 只在显示和键盘边界转换，CSV/profile 仍存端口面。仅静态核查，未编译/运行；详见 [参考面设计](signal_impairments_ui_entry_design.md#42-level-offset-定义与行为)。
+
+Main/Minibar 统一端口 realValue 已静态实施：共享 ReferencedPower adapter 构造捕获 O；helper 从 Main 的展示上下文注册 creator，所有状态/请求保持端口值。EVT 和各类 RSP 在渲染前按同一个 snapshot seq 更新展示消费水位，避免旧响应回退上下文。已打开键盘不被替换；PowerStep 保持 dB。具体迁移与格式基线见 [参考面端口 IPC 方案](level_reference_plane_port_ipc_and_api_integration.md#3-minibar-端口-ipc-的建议落实方式)。
+
 #### 功率步长适配器 `PowerStepUnitAdapter`
 
-- 只服务步长输入区。
+- 用于 dB 差值和步长输入（包括 Level Offset、扫描 LevelStep），不表示绝对功率。
 - base unit 固定为 `dB`。
 - `convertToBase()` 与 `convertFromBaseValue()` 都是 1:1 数值语义，不做 `dBm/dBmV/dBμV` 之间的偏移换算。
 
@@ -254,6 +258,8 @@ Instrument 展示只改变这一层的视觉组织：`TouchNumKeyboard` 从创�
 - 在 `open()` 前调用 `TouchNumKeyboard::setAnchorWidget(cellAnchor)`，键盘即复用与 LabelButton 相同的模式定位和边界钳位算法；普通 Main 跟随 anchor，Instrument 固定主窗口右侧。
 - 临时 anchor 应随 keyboard 销毁清理；不要把 cell 的全局坐标硬编码进调用侧，否则滚动、多屏、DPI 和 Wayland visual geometry 会再次分叉。
 
+2026-11-05：User Flatness Editor 已按当前 MScan 接入同一单元格锚点模式，保留 table trigger 与主窗口 preferred host。此前只设置 host、没有覆盖默认整表 anchor，会使初始位置落在整张表底边。该修改只调整调用侧 anchor，不修改共享呈现/钳位或数值提交路径；未编译或运行验收。
+
 当前 Minibar 已经是独立 `SGStudioMiniBar` helper，不再存在 in-process
 `MiniBarWindow`：
 
@@ -290,9 +296,9 @@ Instrument 展示只改变这一层的视觉组织：`TouchNumKeyboard` 从创�
 `property("currentUnit")` / `setProperty("currentUnit", ...)` 调用仍保持兼容，但单位消费者不应再监听
 宽泛的显示文本变化或临时 keyboard adapter；应监听 property 上的 `currentUnitChanged`。
 
-例如 `CommonPanel` 的 RMS 始终保存 dBm 基准值，只在 `Level.currentUnitChanged` 时通过
-`PowerUnitAdapter` 重绘为 `dBm/dBmV/dBμV`。显示单位变化不进入 Tx runtime，也不触发设备重配或
-波形 RMS 重算。
+例如 `CommonPanel` 的 RMS 始终保存端口 dBm 基准值，在 `Level.currentUnitChanged`、功率显示状态或
+参考面 Offset 变化时通过工厂创建的 `ReferencedPower` 重绘为 `dBm/dBmV/dBμV`。
+显示单位或参考面变化不进入 Tx runtime，也不触发设备重配或波形 RMS 重算。
 
 ### 4.2 `displayText` 不是 UI 自己格式化出来的
 
@@ -304,6 +310,8 @@ Instrument 展示只改变这一层的视觉组织：`TouchNumKeyboard` 从创�
 4. 调用 `metadata()->setDisplayText()` 写回。
 
 然后 `PropertyBindingManager` 监听 `displayTextChanged`，把这个文本推到 `LabelButton`。
+
+自 2026-11-02 起，`NumericProperty` 同时监听 `currentUnitChanged`，因此仅换单位也会刷新显示。普通属性键盘只写 `value/currentUnit`，不再用临时 adapter 文本覆盖 `metadata.displayText`；业务校正后的当前值由属性统一格式化。
 
 这个链路的意义是：
 
@@ -333,12 +341,16 @@ Instrument 展示只改变这一层的视觉组织：`TouchNumKeyboard` 从创�
 
 1. 打开键盘时，记录本次编辑会话的初始 `value/currentUnit/displayText`。
 2. 键盘提交时，记录“刚刚提交的数值”和“本次是否改了单位”。
-3. 如果键盘仍存活时收到了 `property->valueChanged`，并且新值不同于刚刚提交的值，则认定为业务层同步修正。
-4. 如果修正结果等于编辑前原值，则恢复编辑前的 `currentUnit` 和 `displayText`。
+3. 如果键盘仍存活时收到了 `property->valueChanged`，读取当前 `property->value()`；如果不同于刚刚提交的值，则认定为业务层同步修正。通知参数只代表该次变化，前面的同步槽可能已经再次改值，不能当作最终值。
+4. 如果修正结果等于编辑前原值，则恢复编辑前的 `currentUnit` 和键盘显示；属性显示仍由 `NumericProperty` 生成。
 5. 如果修正结果不是原值，而是新的合法值，则对 `Frequency/Time` 这类自动规范化单位的属性清空本次编辑残留单位，再按合法值重新归一化显示。
 6. 键盘关闭时，如果本次提交已经被业务层修正，则禁止 `finished` 再把错误单位写回 property。
 
 这样做之后，公共层可以统一覆盖 AM、FM、Pulse、Ramp 等“键盘提交后业务立即修正值”的路径，而不需要在每个业务模块里单独补“清空单位”或“恢复单位”的局部逻辑。
+
+2026-11-02 的 Pulse 回归静态溯源确认：派生占空比刷新曾通过 `DutyCycle.valueChanged` 反写 Width，形成内层校正完成后外层旧通知继续到达的链路。修复后派生值由 `PulseModulation` 镜像，只有 DutyCycle 的 `editingFinished` 才进入 Width 约束/设备 resolver；面板只绑定属性。公共键盘与枚举绑定均按当前属性刷新。
+
+属性键盘打开时及 metadata 的 `minValueChanged/maxValueChanged` 到来时，复用同一个 `QDoubleValidator` 更新范围。OFDM FFT 联动、设备能力刷新、Quick Waveform 文件/切片范围变化不能继续使用打开时的旧边界；约束本身仍由业务 owner 计算。
 
 ### 4.4 文本提交与步进必须分开建模
 
@@ -348,7 +360,7 @@ Instrument 展示只改变这一层的视觉组织：`TouchNumKeyboard` 从创�
 
 1. `BaseUnitAdapter` 在回车提交前标记 `EditingTrigger::Commit`。
 2. `StepController` 在步进回写前标记 `EditingTrigger::Step`。
-3. `prepareNumericKeyBoard(...)` 收到 adapter 的 `editingFinished` 后，总是立即同步 `value/currentUnit/displayText` 到 property。
+3. `prepareNumericKeyBoard(...)` 收到 adapter 的 `editingFinished` 后，立即同步 `value/currentUnit` 到 property；`NumericProperty` 统一更新 `displayText`。
 4. 如果来源是 `Step`，则保留既有语义，立即 `emit property->editingFinished()`，因为这一路本来就没有“键盘即将关闭”的生命周期风险。
 5. 如果来源是 `Commit`，则只把 `pendingPropertyEditingFinished` 记到本次键盘会话里，等键盘 `finished(QDialog::Accepted)` 后再通过 `QTimer::singleShot(0, property, ...)` 发出 `property->editingFinished()`。
 

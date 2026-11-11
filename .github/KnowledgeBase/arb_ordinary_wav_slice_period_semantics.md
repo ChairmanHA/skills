@@ -32,7 +32,7 @@
 
 - `0 <= sampleOffset <= samplesInFile`
 - `0 <= samplesToUse <= samplesInFile - sampleOffset`
-- `1 <= period <= MAXDOWNLOADSIZE / 4`
+- `1 <= period <= current maxWaveformBytes / 4`（实际生成还检查最终补齐后的 payload 容量）
 - `samplesToUse <= period`
 
 合并后，`samplesToUse` 的实际最大值为：
@@ -95,7 +95,7 @@
 
 1. 计算 `availableSamples = IQ_handling.size() / 2`
 2. 将 `sampleOffset` 收口到 `[0, availableSamples]`
-3. 将 `period` 收口到 `[1, MAXDOWNLOADSIZE / 4]`
+3. 将 `period` 按当前 Playback 容量收口，最终补齐后的 payload 也不能超过该容量
 4. 将 `samplesToUse` 收口到 `min(params.samplesToUse, availableSamples - sampleOffset, period)`
 5. 创建长度为 `period` 的输出缓冲区并清零
 6. 将 `samplesToUse` 对应的文件片段拷贝到输出缓冲区开头
@@ -152,16 +152,17 @@
 
 `ProgrammedArb` 走的是文件内部定义的分段/点表语义，不允许 UI 的 `sampleOffset / samplesToUse / period` 截取逻辑介入。修改这三个字段时，不应把本文件的规则套到 `ProgrammedArb` 上。
 
-### 6.2 restoreSettings 是旁路赋值
+### 6.2 恢复与清空状态
 
-当前 `restoreSettings()` 会直接写入 `m_sampleOffset / m_samplesToUse / m_period`，然后依赖 `handleData()` 做最终防御性收口。
+当前 `restoreSettings()` 在文件恢复所需能力未就绪时保存 pending profile；就绪后通过 `applyRestoredProfile()` 按 File/Rate/Offset/Period/SamplesToUse 顺序复用既有 setter。
 
-这意味着：
+无文件、清空或容量拒绝后的 `Period = 0` 是合法状态。ARB 与 Quick Waveform 的基础 metadata 允许 0，避免内部清空写回被通用夹值改成 1；有文件播放的正周期仍由 generator/business 收口。
 
-- 就“最终生成的 payload”而言，语义仍然是正确的。
-- 但就“成员值是否在 restore 后立即正规化”而言，这条路径目前不是通过 setter 收口的。
+### 6.3 Quick Waveform 的相同切片语义
 
-如果未来要强化 profile 恢复的一致性，可考虑把 restore 路径也改成复用统一的参数正规化逻辑。
+Quick Waveform 的 SamplesToUse 上限与裁剪由 `QuickWaveformBusiness` 的现有加载、恢复、setPeriod/setSampleOffset/setSamplesToUse 路径负责。面板仅编辑和显示，不在 Period/Offset 的 `valueChanged` 中再次裁剪，也不在打开键盘时维护业务范围。
+
+文件样本数变化时，business 更新 Offset 的 metadata 上限；加载结果先发布 Offset/Period，再发布按最终组合得到的 SamplesToUse 范围和值，避免旧文件长度或新旧参数混合组合截断新结果。公共键盘在范围变化时同步更新 validator。2026-11-02 已静态实施，未构建/运行。
 
 
 ## 7. 修改建议

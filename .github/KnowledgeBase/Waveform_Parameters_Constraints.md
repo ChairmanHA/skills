@@ -250,6 +250,10 @@ $$
 - 含带宽选件档：整体外框为 `Width = 15 ns ~ 1 s`，`Period = 20 ns ~ 1 s`；其中连续200 Msps档的理论边界为`30 ns / 40 ns`，`15 ns / 20 ns`需要精确400 Msps档
 - 所有型号均满足 `Width <= Period`；Width 与 Period 的最大组合还受采样点和 current `maxWaveformBytes` 联合约束，因此上述两个独立范围不能理解为任意组合都可同时成立
 
+1 s 是现有产品外框，并非任意 Width/设备组合的实际周期上限。例如无带宽选件档 `Width = 48 ns` 需要125 Msps，125 MiB容量对应最大 `Period = 0.262144 s`；含选件档 `Width = 15 ns` 需要400 Msps，1000 MiB对应最大 `Period = 0.65536 s`。这些组合由同一 business resolver 解析并永久回写，UI/SCPI 不另建固定设备范围表。
+
+占空比由 `PulseModulation` 按当前 Width/Period 镜像到 `Pulse_DutyCycle`。只有显式 `editingFinished` 才将百分比换算成 Width，并复用 Width 的业务约束与生成流程；派生显示刷新不得通过 `valueChanged` 反写参数。Main 与 SCPI 共用此入口，Minibar 将占空比转换为 Width 意图后仍由主进程同一 resolver 收口。2026-11-02 已静态实施，未构建/运行。
+
 #### 采样率策略
 
 Pulse 采样率由 `PulseModulation` 的 business resolver 决定，需同时满足：

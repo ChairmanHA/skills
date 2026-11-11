@@ -52,6 +52,18 @@ QLineEdit[state="error"] {
 - `QDialog QPushButton`: QDialog 内部的**所有** QPushButton（子孙后代）。
 - `QDialog > QPushButton`: QDialog **直接**子节点中的 QPushButton（亲儿子）。
 
+逗号分隔的每一项都是独立选择器，不会继承前一项的祖先范围。例如 `Core--Internal--TitleBar QPushButton#btnMin, #btnMax, #btnClose` 中后两项会匹配全局同名控件。应逐项写完整范围：
+
+```css
+Core--Internal--TitleBar QPushButton#btnMin,
+Core--Internal--TitleBar QPushButton#btnMax,
+Core--Internal--TitleBar QPushButton#btnClose {
+    background-color: transparent;
+}
+```
+
+2026-11-05 的 User Flatness Editor 曾因该作用域遗漏，令操作栏 Close 误用标题栏的透明背景与固定尺寸；已在各品牌深浅主题修正祖先范围。
+
 ### 2.4 ID 选择器
 - `QPushButton#okButton`: 匹配 `objectName` 为 "okButton" 的按钮。
   - *Tip*: 在 Designer 中设置 `objectName`，或者代码中 `btn->setObjectName("okButton")`。

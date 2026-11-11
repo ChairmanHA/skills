@@ -28,10 +28,9 @@
      - warning -> 送入 `DeviceInfoWidget` 的 warning 队列滚动播放
 
 3. **实时状态里的 RLO 小指示链路**
-   - 入口同样是 `deviceRealTimeStatusUpdated(status)`。
-   - `DeviceInfoWidget::updateDeviceRealTimeStatus()` 直接读取原始 `warnningCode`。
-   - 若 warning code 是 `15/16/17/18`，则在状态栏右侧显示很小的 `RLOxx` 指示。
-   - RLO15 同时触发短暂的失锁滚动报警，不依赖恢复后的当前参考源属性。
+   - controller 将 LockLoss 告警的 `DeviceWarning`（码及确认状态）随文案传给控件。
+   - `DeviceInfoWidget` 从当前轮播项派生右侧 `RLOxx`，与失锁文案同时切换，支持 15–19。
+   - 当前轮播普通 warning、队列为空或设备断开时隐藏 RLO；不再从原始状态另外选择一个码。
 
 4. **配置结果型局部状态链路（Level UnLevel）**
    - 入口不是实时轮询，而是 `tx_config_ffm()` 的局部返回结果。
@@ -134,14 +133,14 @@
 3. `MainWindowDeviceController::onDeviceRealTimeStatusUpdated(const DeviceRealTimeStatus &status)`
    - 先做当前设备 UID/非零能力revision过滤，避免设备切换或同UID重开后的陈旧状态污染新 UI
    - 先把原始状态刷新到 `DeviceInfoWidget`
-   - 再分别处理errorCode、原External失锁事件、activeWarnings活动集合和普通warnningCode
+   - 统一维护活动告警与本次失锁提示，再处理 errorCode 和普通一次 warnningCode
 
 这里顺序很重要：
 
-- `DeviceInfoWidget` 会先看到原始 `warnningCode`
+- `DeviceInfoWidget` 先更新温度、GNSS、吞吐等设备状态，不再在此按原始 `warnningCode` 选择 RLO
 - `MainWindowDeviceController` 随后才会根据状态型规则或 `warningCategory()` 判断它是否进入滚动 warning 队列
 
-因此，某些被分类为 `Ignorable` 的 warning 仍然可以在 `DeviceInfoWidget` 内部触发局部 UI，例如 `RLO` 小指示；也可以由 controller 显式提升为带生命周期的状态型滚动 warning，例如 External 下的 RLO15。
+设备层通过 `warningCategory()` 定义展示类别：General 沿用普通提示，LockLoss 随状态快照展示失锁文案，Ignorable 不进入滚动队列。RLO 与当前轮播项共享失锁元数据，不另建独立选码状态。
 
 ---
 
@@ -234,13 +233,12 @@ warning 不走 `MessageDialog`，而是进入状态栏控件 `DeviceInfoWidget` 
 
 `MainWindowDeviceController::onDeviceRealTimeStatusUpdated()` 对 warning 的处理规则是：
 
-1. 先处理随状态快照出现/消失的 warning，例如参考时钟 RLO15。
-2. 普通 warning 仅在 `status.warnningCode != 0` 时处理。
-3. 若 `m_lastWarningCode == status.warnningCode`，则忽略，避免重复入队。
-4. 调用 `device->warningCategory(status.warnningCode)` 做分类。
-5. 只有 `WarningCategory::General` 才会进入前端滚动显示。
-6. 用 `translateShortStrOfWarningCode()` 生成短文案。
-7. 调用 `m_deviceInfoWidget->addWarnningMessage(warningStr)`。
+1. `updateActiveWarningMessages()` 收集 General 和 LockLoss 活动项，并用 `translateShortStrOfWarningCode()` 生成文案；2026-10-30 按用户要求移除 NotUpdated 的状态未更新后缀，内部确认状态仍保留。
+2. 本次 `warnningCode` 属于 LockLoss、且活动集合没有同码时，将其加入本轮受管消息集合。
+3. 受管消息按集合差异加入/移除，不因一次码消费丢失活动项，不重复入队；本轮不再报告的一次失锁提示在下一快照移除。
+4. 普通一次 warning 仅在 `status.warnningCode != 0` 且与 `m_lastWarningCode` 不同时处理。
+5. 普通一次链路只接收 General，且跳过已有同码受管文案；LockLoss 已在第 2 步处理，不再重复加入永久循环队列。
+6. 最终均通过 `DeviceInfoWidget::addWarnningMessage()` / `removeWarnningMessage()` 操作原队列。
 
 若本次 `warnningCode == 0`，则 `m_lastWarningCode` 被重置为 0。
 
@@ -253,23 +251,35 @@ warning 不走 `MessageDialog`，而是进入状态栏控件 `DeviceInfoWidget` 
 
 更完整的 preview 边界见 [sweep_preview_validation_boundary.md](sweep_preview_validation_boundary.md)。
 
-### 5.1.1 参考时钟失锁短暂 warning
+### 5.1.1 全部失锁 warning 与参考时钟恢复
+
+2026-10-28 起，`FancyDevice::warningCategory()` 将 15–19 统一归为 LockLoss，文案仅由设备层的 `tr()` 提供。删除 UI 中仅针对 15 的外参考专用函数和布尔状态；15 表达系统时钟失锁，不以当前参考源推断为外参考故障。
+
+| 码 | `tr()` 英文源文案 |
+| --- | --- |
+| 15 | `System clock unlocked (Code = %1).` |
+| 16 | `AD/DA clock unlocked (Code = %1).` |
+| 17 | `DLREF reference clock unlocked (Code = %1).` |
+| 18 | `RF local oscillator unlocked (Code = %1).` |
+| 19 | `IF local oscillator unlocked (Code = %1).` |
+
+Excel 翻译文件由用户维护，本次仅修改程序中的源键。多个失锁可共同轮播并分别移除；open 成功清理上一会话的受管文案，断开/切换沿用完整队列清理。仅静态核对，未编译或进行设备验收。
 
 External查询返回warning 15时，先通过原码/活动集合显示原失锁报警；恢复等待门限100ms，过门限的下一合法状态周期先单次配置Internal，后续普通查询自然清警：
 
 1. 当前H2 API已无旧device_query_state。device_query_clock用于完整配置后、显式查询和非Streaming已上电状态轮询；普通配置仍沿用其他参数回读之后的查询位置。查询助手只采样，不配置或二次确认。
 2. External查询返回 `H2_WARNING_SYSCLK_UNLOCKED (15)` 时，FancyDevice更新活动15/原warnningCode并启动延迟计时。既有约1秒状态周期检查100ms门限，到期先执行一次Internal配置，保留当前RefOut，再普通查询；这是轮询执行，不是100ms主动回调。SDK访问被禁止时延后，不再因1000ms门限多等一轮。
-3. controller直接根据原warnningCode=15或活动集合含15维护已有文案External reference clock not locked.，不再增加externalReferenceClockUnlock历史事件字段。
-4. getRealTimeStatus只消费原一次提示码，不消费活动项。后续普通clock查询正常/锁定自然移除活动15，UI/RLO随状态清除；失败/跳过保留未更新项。断开/切换设备清理。
-5. 沿用原队列和文案，不添加恢复成功提示、专门清警定时器或阻塞等待/盲重试；恢复只自动配置一次。有效普通clock观测继续回写Profile/TX，同值不重复发布。
+3. controller 从原 warnningCode 或活动集合取到 15 后，通过统一 LockLoss 路径显示系统时钟失锁文案，不增加历史事件字段。
+4. getRealTimeStatus只消费原一次提示码，不消费活动项。后续普通clock查询返回0时清除Clock来源的活动项，UI/RLO随快照更新；失败/跳过保留未更新项。2026-11-09起告警码与锁定位独立，不根据locked补报15或撤销真实15，不跨来源清警。断开/切换设备清理。
+5. 沿用原队列，不添加恢复成功提示、专门清警定时器或阻塞等待/盲重试；恢复只自动配置一次。有效普通clock观测继续回写Profile/TX，同值不重复发布。
 
-活动集合包含code与Confirmed/NotUpdated，按来源采样更新，读取不清零；通用General消息按集合差异加入/移除，同码一次提示不重复入队，未更新项附状态说明。RLO/UnLevel专有分类保持，99不新增滚动提示。Internal自身15不会触发External自动恢复条件。运行中失锁检测只扩展至非Streaming已上电的合法查询场景，未采样保持未更新。详见[实时warning重构](htra_runtime_warning_polling_design.md)和[参考时钟接入](htra_reference_clock_integration.md)。实现目前只完成静态检查，硬件项待验收。
+活动集合包含code与Confirmed/NotUpdated，按来源采样更新，读取不清零；General 和 LockLoss 消息按集合差异加入/移除，同码一次提示不重复入队，未更新项显示原告警文案，不额外附状态说明。UnLevel 仍为局部提示，99不新增滚动文案。Internal自身15不会触发External自动恢复条件。此次展示扩展不新增 SDK 查询或硬件恢复，未采样保持未更新。详见[实时warning重构](htra_runtime_warning_polling_design.md)和[参考时钟接入](htra_reference_clock_integration.md)。实现目前只完成静态检查，硬件项待验收。
 
 ### 5.2 DeviceInfoWidget 的队列与循环播放
 
 `DeviceInfoWidget` 内部维护：
 
-- `QQueue<QString> m_messageQueue`
+- `QQueue<WarningMessage> m_messageQueue`，元素含文案和可选的 `DeviceWarning lockLoss`（普通 warning 不携带）
 - `QTimer *m_warningTimer`
 - `bool m_warningLoop`
 
@@ -282,36 +292,35 @@ External查询返回warning 15时，先通过原码/活动集合显示原失锁�
 向队列追加 warning 前，会做两层文本去重：
 
 1. 如果队列里已经有完全相同的字符串，不重复入队
-2. 如果当前正在显示的文本里已经包含该字符串，不重复入队
+2. 如果当前正在显示的原文案与该字符串完全相同，不重复入队
 
 #### showNextWarningMessage() 的播放规则
 
 - 每次从队列头取一条 warning 显示到 `warnningStatus`
+- 同时由该条消息的 LockLoss 元数据更新 RLO，不解析翻译后的文案；未更新状态 tooltip 已移除
 - 文本格式为 `Warning : <message>`
 - 定时器每 3000ms 播放下一条
 - 若 `m_warningLoop == true`，刚展示过的消息会重新入队尾，形成循环播放
+- 空队列停止定时器并清空当前项；后续新增消息立即开始显示，不等待残留的空循环周期
 
 #### clear / remove 语义
 
-- `clearWarningQueue()` 会清空队列并清空当前显示文本
+- `clearWarningQueue()` 会清空队列/当前项、停止定时器，并同步清空 warning 与 RLO 展示
 - `removeWarnningMessage()` 会从队列中删掉指定文案；如果删的是当前正在显示的文案，则立刻切换下一条
 
 ### 5.3 RLO 小指示与滚动 warning
 
-`DeviceInfoWidget` 内部存在一条独立的 RLO 指示链路：
+2026-10-28 按用户现场反馈改为联动：原实现每次状态快照优先取一次码，否则从活动集合取最小的 15–18，与 3 秒轮播无关，因此原码持续 17 时，即使文案轮播 15/17，小字也固定 RLO17。
 
-1. updateDeviceRealTimeStatus优先读取原一次提示warnningCode；无对应RLO时再从activeWarnings选择
-2. 仍仅识别15/16/17/18；多项时按码的固定优先级选择一个，未更新项提供tooltip
-3. `updateRloIndicatorVisibility()` 决定是否显示右侧很小的 `RLOxx` 文本
+当前实现将文案和可选 `DeviceWarning` 存为同一个 WarningMessage 值：
 
-这条链路的关键点是：
+1. controller 只为 LockLoss 传元数据；活动项保留原 Confirmation，一次失锁码标为 Confirmed。General 不传元数据。
+2. showNextWarningMessage 同步更新 warning 文案和当前项对应的 `RLO<code>`；15/17/19 分别显示 RLO15/RLO17/RLO19。
+3. 当前项为普通 warning 或队列为空时隐藏 RLO；断开也隐藏。显示模式和宽度限制继续沿用。
+4. 2026-10-30 移除 NotUpdated tooltip；仅保留 RLO 编号及原告警文案，Confirmation 不影响展示文本。见[TaskLog](../TaskLog/2026-10-30_remove-status-not-updated-hint.md)。
+5. 对应告警恢复后，由 controller 移除该消息；若它正被展示，立即切到下一条并同步小字。清空则两处同步清理。
 
-- RLO 不依赖 `addWarnningMessage()`
-- RLO 小指示不等于 warning 队列
-- RLO由一次提示或活动集合共同决定；持续异常不因一次提示清零而隐藏，所有支持项移除后才隐藏
-- 原External+15事件会被controller映射成可自动移除的滚动warning，显示不受恢复后的参考源属性影响
-
-这也是为什么 `FancyDevice::warningCategory()` 把 RLO 类 warning 归为 `Ignorable` 后，RLO 小指示依旧可以工作。
+1 秒状态更新不再覆盖当前轮播码；控件没有第二个独立 RLO 选码字段，也不从译文提取 Code。设备采样/恢复和活动集合生命周期保持不变。本次仅静态核对，未构建/运行，现场仍需验证轮播及恢复显示。
 
 ### 5.4 当前滚动队列边界
 
@@ -319,26 +328,15 @@ External查询返回warning 15时，先通过原码/活动集合显示原失锁�
 
 也就是说，前台 warning 区现在不再承担“大波形生成中”的通用 busy 展示职责。
 
-当前 HTRA 侧被允许进入滚动 warning 的主要是 `WarningCategory::General`：
+当前 HTRA 侧的 `WarningCategory::General` 继续包括：
 
 - `STATUS_WARNING_BUSTIMEOUT`
 - `STATUS_WARNING_TXLEVEL_FILEDEFAULT`
 - `STATUS_WARNING_IQCAL_FILEDEFAULT`
 
-而下列 warning 虽然可能出现在原始 `warnningCode` 中，但默认不按普通 warning 进入滚动队列：
+失锁 15–19 属于 `WarningCategory::LockLoss`，从本次码/活动集合进入随快照移除的滚动队列，并随当前轮播项驱动同码 `RLOxx` 小指示。
 
-- `STATUS_WARNING_SYSCLK_UNLOCKED`
-- `STATUS_WARNING_ADDACLK_UNLOCKED`
-- `STATUS_WARNING_LOREF_UNLOCKED`
-- `STATUS_WARNING_RFLO_UNLOCKED`
-- `STATUS_WARNING_UNLEVEL`
-- `STATUS_WARNING_PARAMOUTRANGE`
-
-其中：
-
-- `15/16/17/18` 仍会驱动 `RLOxx` 小指示
-- `15 / H2_WARNING_SYSCLK_UNLOCKED` 会额外驱动短暂滚动文案 `External reference clock not locked.`，下一次不含 15 的状态快照移除文案
-- `99 / STATUS_WARNING_UNLEVEL` 已改为 `CommonPanel Level` 的局部 badge 状态
+98（参数归一化）和 99（UnLevel）仍属于 Ignorable，不进入滚动 warning；99 继续由 `CommonPanel Level` 的局部 badge 展示。
 
 更多 `Level` 按钮的本地 badge 处理见 [commonpanel_level_unlevel_badge_ui.md](commonpanel_level_unlevel_badge_ui.md)。
 

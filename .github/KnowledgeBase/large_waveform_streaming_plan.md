@@ -62,12 +62,20 @@
 Phase C 当前实现采用以下硬约束：
 
 1. 允许第一次 `1000 MiB` 连续 `QVector<int16_t>` 分配成功，但绝不允许第二个同级大 payload 同时分配。
-2. 超过 125 MiB 的 owned/external payload 都必须取得 Core 进程级独占租约；租约未释放时，新物化返回业务错误。
+2. 超过 125 MiB 的 owned/external payload 都必须取得 Core 进程级独占租约；普通驻留占用时，新物化返回业务错误。已登记为下载消费的占用允许异步生成线程等待实际释放，然后继续生成。
    - 对合作方 external generator（包括 Playback 生成和完整 Save IQ 导出），租约必须在调用生成 API、由其分配大内存之前取得；不能等指针返回后再检查，否则仍可能短暂出现两份同级大内存。
+   - 租约统一由 move-only `PlaybackPayloadReservation` 持有。owned/external 工厂和 Builder 共用元数据分配点：先用 `QSharedPointer::create()` 创建空 DataBlock/Storage，全部分配成功后才通过 noexcept swap/移动提交缓冲、释放回调和租约；分配失败时原持有者清理缓冲，RAII 归还租约，catch 不再手动释放租约。
+   - 提交后租约由 DataBlock 的首个成员持有、最后析构，保证 external release/owned 缓冲释放完成后才归还大内存占用。实际 external payload 未超过 125 MiB 时，归还预估阶段多取得的大租约。
+   - Digital/DSSS/OFDM、HTRA AM/FM/PM/Pulse/Ramp/AWGN/Multitone 的 worker 向 reservation/builder 传入取消检查；参数更新和退出在更新 pending/exit/revision 后调用 `notifyGenerationChanged()`。取消旧等待后沿原 worker 循环处理最新请求，退出先通知再 join。同步 Save IQ 不传取消检查，保持非等待语义。
+   - 等待采用条件变量，不轮询、不定时重试；取消回调在资源锁外执行，用变化序号封闭检查取消与入睡之间的通知窗口。Digital/DSSS/OFDM 的 pending/exit 写入和最终结果发布检查均受生成器 mutex 保护。
+   - 多个业务争用时仍只有一个大 payload 名额；如果被另一普通驻留 payload 取得，其他请求返回原有占用错误，不保证跨业务排队。
 3. payload 在 builder 阶段唯一可写，发布后只暴露 `const int16_t *`，不允许触发 `QVector` detach。
-4. `tx_download_waveform()` 已确认不会完整复制输入；同步调用返回后，runtime 立即释放共享 host storage。
+4. `tx_download_waveform()` 已确认不会完整复制输入；runtime 通过 `consumeStorageView()` 在持有 storage mutex 时取得读租约并登记下载消费，避免新请求 detach 与登记之间的竞争。同步回调结束时通过 RAII 脱离共享 host storage，成功、失败和异常均遵循此释放协议。已有读租约仍使 DataBlock 存活，最后一个读回调返回并释放真实缓冲后才归还大内存租约、唤醒等待生成线程。普通 `withStorageView()` 不承诺消费后释放。
 5. request/cache 只保留 payload identity、offset、word count；同一设备/能力 revision 的参数-only reapply 复用设备端已下载波形，不要求 host 保留 1000 MiB。
-6. Digital、DSSS、OFDM 合作方生成器已经通过 `PlaybackPayload::adoptExternal(pointer, wordCount, deleter)` 直接移交原始指针；其他合作方生成器后续迁移时沿用相同接口和独占租约。
+6. Digital、DSSS、OFDM 合作方生成器通过带 `PlaybackPayloadReservation` 的 `PlaybackPayload::adoptExternal(...)` 直接移交原始指针和释放责任；无 reservation 重载已删除。成功与失败均消费传入的租约，失败时外层执行一次 external release。
+7. Digital/DSSS/OFDM 的缓存保存仅依赖 `withStorageView` 保护合作方缓冲，不在整个文件写入期间持有 `Analog::waveformGuard`；生成 API 和 external release 回调本身仍按原有规则加锁，避免最后一个读租约在保存线程结束时重入同一把锁。
+8. Digital Save IQ（2026-11-11 静态实施、待运行验收）：完整缓存后台直存；需重生成时先确认，再选路径，WAV/磁盘空间检查及 QFile 打开目标文件成功后，才释放本次 Digital 缓存并申请完整导出租约。使用真实写盘进度；按用户明确要求直接覆盖写入，不保护旧文件、不试写探测、不回滚。生成期间为模态交互，不增加生成请求延后机制。没有 SDK 峰值内存保证，不清理其他业务缓存，也不绕过已有下载读租约。
+9. Multitone 保留最终 N 点 payload，但在合并 bin 后按 `g=gcd(N,bins)` 约简共同周期 P=N/g，只分配 P 点 complex<double> 工作区。DC、RMS/峰值和量化按 P 点执行，再可取消地复制为 N 点；主要两块内存为 `4N+16P`，g=1 时仍为原完整工作区。该工作区不计入 payload 独占租约，不能把单 payload 契约理解为整个进程的内存预算。
 
 ### 3.4 DSSS / OFDM / Ramp 的当前容量边界
 

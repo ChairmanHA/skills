@@ -260,3 +260,72 @@ RMS dBm = Level dBm + 10 * log10(avgPower / fullScalePeakPower)
 - 因此 `Count = 2` 下显示 `PEP - 6 dB` 是正确计算，不是 RMS 公式错误。
 
 后续如果要统一所有 provider 的 `Level = PEP` 语义，应优先统一 generator 的满幅 PEP 口径。共享 RMS helper 应继续保留现在这种基于最终 IQ 平均功率和统一 `fullScalePeakPower` 的计算方式。
+
+## 2026-11-03 补充：Pulse 的行业语义与控制建议
+
+本节记录行业调研和最终只读交互。2026-11-03 用户已将 Pulse RMS 改为与 Streaming 一样不可编辑，保留平均功率数值；此前方案 A 的一次性输入取消。业务插件仍声明 Pulse 保持 Level，其余有界 baseband 默认保持 RMS，RMS 标签/布局不变。当前合同见 [Level/RMS 设计](rms_level_async_interaction_design.md)。调研记录见 [审查 TaskLog](../TaskLog/2026-11-03_pulse-rms-pep-industry-review.md)，最终实现见 [只读 TaskLog](../TaskLog/2026-11-03_pulse-rms-readonly.md)。已完成源码修改与静态检查，尚未编译/运行验收。
+
+### RMS 方法与平均时间窗
+
+在纯电阻负载上，平均功率为 `mean(v²)/R = Vrms²/R`。行业界面常称为 RMS Power；它表达基于电压平方的功率平均，不能理解为对瓦特值再次计算 `sqrt(mean(P²))`。RMS 本身不规定平均时间窗。
+
+- **整周期平均功率**：包含 ON 和 OFF，用于描述平均输出能量/时间、热负载和平均功率预算。
+- **脉冲导通期间平均功率（Average ON / Pulse Power）**：仅在定义的导通区间内平均，仍可用 RMS 方法计算。导通区间、有效平台区间和门控范围需要明确。
+- **顶部功率（Top Power）**：描述脉冲平台电平；有过冲、droop 或脉内幅度调制时，不必等于 ON 区间平均或最大包络功率。
+- **PEP**：包络最大处的 RF 周期平均功率；不是 RF 正弦瞬时功率最大值。理想平顶无过冲脉冲的 Top / ON Power / PEP 数值相同，非理想包络不能直接等同。
+
+官方依据：
+
+- [Keysight V3500A User's Guide，第 104 页](https://www.keysight.com/us/en/assets/9018-02547/user-manuals/9018-02547.pdf)：由 RF 周期平均得到 `P = Vrms²/R`。
+- [Keysight 89600 VSA 的 Power Averaging](https://helpfiles.keysight.com/csg/89600B/Webhelp/Subsystems/powerspectrum/content/ps_vbw.htm)：在线性功率单位中平均，再转为 dB 显示，解释 RMS 名称的来源。
+- [Tektronix Fundamentals of Radar Measurements，Average ON Power / Average Transmit Power](https://www.tek.com/en/documents/primer/fundamentals-radar-measurements)：区分仅脉冲 ON 时间内的 RMS 功率与覆盖 ON+OFF 的发射平均功率。
+- [ITU-R SM.1413-1，Power Measurement Method Code](https://www.itu.int/dms_pubrec/itu-r/rec/sm/R-REC-SM.1413-1-200304-S%21%21PDF-E.pdf)：区分包络峰顶 RF 周期平均的 PEP 与足够长时间内的 Mean Power。
+
+### SGS 当前代码观察
+
+相关源码由 `src/plugins/htra/CMakeLists.txt` 和 `src/plugins/core/CMakeLists.txt` 明确纳入，调用链为：
+
+1. `pulsemodulator.cpp:25–27` 定义 OFF=`(0,0)`、半幅=`(16384,16384)`、满幅=`(32767,32767)`；`generateWaveform` 生成完整周期。
+2. `pulsemodulator.cpp:416–418` 对最终 payload 统计；`iplaybackbusiness.cpp:14–41,108–136` 以 `F=2×32767²` 计算平均/峰值偏移与 PAPR。短 payload 重复整周期，不改变统计比例。
+3. `pulsemodulation.cpp` 的 `buildPlaybackExecutionContext` 把该指标传给 Core；`TxSessionService::resolvePowerLevel` 对允许 RMS 输入的业务通过 `Level = targetRms - offset` 解析硬件电平，受硬件范围约束。Pulse 选择后保持 Level，函数内没有 Pulse 专用判断。
+4. `PulseModulation::providerCapabilities` 声明 `TxPowerHoldMode::Level`；Core 根据该声明将 RMS 作为只读派生值，`publishAppliedRequest` 只为 Rms 业务建立 RMS。内部状态由 PendingLevel 更名为 Level，没有新增持久化字段。
+5. `fancydevice.cpp:1333–1355` 将解析后的 Level 传入 `tx_config_ffm`，没有把 RMS 数值作为另一项独立硬件设置。
+
+对理想平顶脉冲，忽略边沿和 RF 链路误差：
+
+```text
+Pulse Top / ON Power / PEP ≈ Level
+Average over period = Level + 10log10(D)
+```
+
+现场用户观察“DET 脉冲顶部对应 Level，而非界面的 RMS”与该模型一致。这里按项目 DET 测试文档所述的功率-时间观察理解；只有完整周期积分才与整周期 RMS 对应，不能仅凭模式名确定读数。RBW、VBW、门控与读数类型仍决定测量结果。
+
+当前 half-level 边沿已作用于最终样点，所以整周期平均应继续以 payload 统计为准，不能用理想 Duty 公式替换。双 32767 是本设备已确认的标定约定，不是 RF 行业通用数字满幅定义；保持现有 Pulse IQ 和参考分母，没有依据改为单分量满幅或额外补偿 3 dB。
+
+### 厂商实践与适用边界
+
+- [R&S Pulse Sequencer User Manual v25，第 125 页](https://scdn.rohde-schwarz.com/ur/pws/dl_downloads/pdm/cl_manuals/user_manual/1176_9512_01/RS_PulseSequencer_UserManual_en_25.pdf#page=125)明确把未衰减脉冲的 RF Level 设为 pulse-top power；脉冲 Top Power 衰减相对该参考定义。
+- [R&S SMA100B 窄脉冲电平控制应用说明](https://www.rohde-schwarz.com/us/applications/generating-narrow-pulses-with-highest-level-accuracy-and-repeatability-with-the-rs-sma100b_56279-434176.html)用脉冲顶部与 CW 的电平偏差、顶部电平重复性描述控制性能，包括 1% 占空比场景。
+- [Keysight Pulse Building：Getting Correct Output Power](https://helpfiles.keysight.com/csg/N7620B/Content/Main/Correct_Output_Power.htm)要求用 pulse modulator / ALC hold 防止在 OFF 时间进行电平控制；ALC OFF 时也使用波形 RMS 电压作为 power-search 的校准参考。这证明 RMS 统计仍有内部用途，不能从中推出面板默认保持 ON+OFF 平均功率。
+- [Keysight Signal Studio LTE Uplink Output Power Calculation](https://helpfiles.keysight.com/csg/n7624/Content/Main/Output_Power_Calculation_%28Uplink%29.htm)以功率最高符号的 RMS 作为面板参考，并说明完整波形平均读数会更低。这是特定 LTE 配置的行为，不能泛化为所有 Keysight 波形，但说明即使数字调制也必须定义功率参考的时间范围。
+
+### 当前交互：RMS 只读（替代方案 A，已静态实施）
+
+Pulse 的整周期平均功率有物理意义，适合平均能量、热负载和与平均功率计对照；雷达/接收机脉冲电平设置更适合以导通平台功率为主。
+
+Pulse 保持 Level（当前满幅 Pulse 对应顶部功率），更改 Width/Period/Duty 时保持顶部不变，RMS 按完整周期最终 IQ 更新。保留 RMS 标签、数值格式和布局，主窗/Minibar 的 RMS 控件禁用；统计未知时显示 --，Reset/Startup 不用 Level 冒充平均功率。
+
+Pulse 不再接受 RMS 输入，包括此前的一次性换算：SCPI SET 沿用 SettingsConflict，Core setter 也拒绝；QUERY 可返回只读平均功率。Streaming 无统计值仍为 --；两者复用同一可编辑标志和数值投影，不增加只读状态字段。多音、ARB、文件回放等原 RMS 业务仍按原成功边界建立 RMS。
+
+手动进入 Pulse 和配置恢复选择 Pulse 时均沿用 API Level；从 Pulse 转入 Rms 业务，以当前 Level 和目标波形成功建立 RMS。旧 Pulse 文件若含 rms 参考，采用已有 common.Level，不再执行该目标的一次性换算。旧格式/Reset 仍从 Startup 开始，Pulse 平均值仅由当前 IQ 指标派生，未知时沿用不可用合同。
+
+例：手改 `Level=-10 dBm, Duty=50%` 后，整周期平均约为 `-13.01 dBm`。随后 Duty 改为 10%：
+
+| 保持意图 | 脉冲顶部 | 整周期平均 |
+| --- | --- | --- |
+| 已采用的 Pulse 保持 Level | -10 dBm | -20 dBm |
+| 旧版成功后自动保持 RMS | -3.01 dBm | -13.01 dBm |
+
+该表是理想平顶、稳态且未触及硬件限幅时的静态推导，不是本轮新增实测。只维护现有一条 G13，覆盖占空比、主窗/Minibar 只读和 SCPI SET 拒绝/QUERY 平均值；G6～G10 原用例不改。保存恢复、RF/MOD、SCPI 调用链已静态核对，未新增其他人工用例。双 32767、半幅边沿和统计公式均不变。
+
+其他 baseband 的判断：Digital/DSSS/OFDM、AWGN、多音、ARB/QuickWaveform 均可继续以完整波形 RMS 为主要指标；FM/PM 的理想恒包络下，平均与导通功率不随相位/频偏本身改变。AM 和带空闲尾段的 Ramp 是需要区分参考语义的候选，而非数学上不能使用 RMS：AM 若目标是固定载波，应保持 carrier power（并非直接把现有 Level 当作 carrier）；Ramp 若目标是固定 chirp 导通功率，整周期 RMS 保持会随空闲间隔变化而调整活动段电平。当前代码可确认 AM 包络含 `1+m×shape`、Ramp 在 `Period>SweepTime` 时补零；本轮不改变两者策略。AM 行业参考见 [Keysight E8267D 规格的 AM 注释](https://www.keysight.com/us/en/assets/7018-01210/data-sheets/5989-0697.pdf)；Ramp 的候选判断来自当前算法和统计区间的直接推导，不声称厂商所有 chirp 模式都采用同一保持量。
