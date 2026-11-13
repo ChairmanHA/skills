@@ -2,6 +2,8 @@
 
 本文档基于罗德与施瓦茨（Rohde & Schwarz，以 R&S®SMW200A / SMBV100B 矢量信号发生器体系为基准）官方用户手册第 14.20.14 节（`SOURce:LIST` 子系统）、14.20.14.1 节（`List mode settings`）及第 8.10.6 节（`List mode` 核心概念与硬件行为），系统梳理 R&S 在列表跳频/跳功率（List Mode）上的 SCPI 命令架构、状态机、参数体系与典型执行时序，为本项目的 MScan / List 模式 SCPI 接口与底层驱动设计提供权威参考。
 
+2026-11-12 复核：可直接核对的 R&S 官方驱动文档为 [RsSmcv MODE / RESET](https://rssmcv.readthedocs.io/en/latest/Source_ListPy.html)、[Trigger Source](https://rssmcv.readthedocs.io/en/latest/Source_ListPy_Trigger.html)、[Index](https://rssmcv.readthedocs.io/en/latest/Source_ListPy_Index.html)。核心语义是 AUTO 一次触发执行一轮、STEP 一次触发执行一步；source AUTO/IMMediate 的适用模式只列 AUTO，SINGLE/BUS 和 EXT 均可配合 AUTO/STEP。不同 R&S 型号和固件仍应以其手册为准；这些命令说明未充分规定所有型号的首次触发点位时序。本文描述 R&S 参考语义，SGStudio 的实际支持及限制见 [调试指南](listmode_scpi调试指南.md)。
+
 ---
 
 ## 1. 核心架构与设计思想
@@ -143,7 +145,7 @@ graph TD
 * **参数枚举**：
   * `AUTO`：自动全表扫描。接收到一个触发事件后，仪器依照各点驻留时间自动连续执行完整列表（或由 `STARt/STOP` 决定的子区间）。
   * `STEP`：单步步进。接收到一个触发事件后，仅执行当前步，然后等待下一个触发事件，按索引升序前进。
-  * `INDex`：索引定位模式。每次触发直接应用 `:LIST:INDex` 所指定的单点参数。
+* **索引定位**：所核对的 R&S MODE 参数仅列 `AUTO|STEP`；`:LIST:INDex` 是 STEP 下设置索引的独立命令，不能据此推导存在通用的 `MODE INDex` 枚举。SGStudio 保留 `MODE INDex` 输入并降级为 AUTO，是本项目的兼容行为。
 * **复位值（\*RST）**：`AUTO`。
 
 #### `[:SOURce<hw>]:LIST:RMODe <RMode>`
@@ -170,7 +172,7 @@ graph TD
 | R&S 参数枚举 | SCPI 标准对齐枚举 | 适用列表模式 | 触发与执行行为 |
 | :--- | :--- | :--- | :--- |
 | `AUTO` | `IMMediate` | `MODE AUTO` | **自由运行连续循环**：触发条件持续满足，列表执行完毕后立即自激重启。 |
-| `SINGle` | `BUS` | `MODE AUTO` 或 `MODE STEP` | **软件/总线单次触发**：由 `:LIST:TRIGger:EXECute` 或 `*TRG` 触发，执行一次全表或前进一步。 |
+| `SINGle` | `BUS` | `MODE AUTO` 或 `MODE STEP` | **软件/总线单次触发**：由 `:LIST:TRIGger:EXECute` 触发，执行一次全表或前进一步。`*TRG` 是否适用须按目标型号手册核对。 |
 | `EXTernal` | `EXTernal` | `MODE AUTO` 或 `MODE STEP` | **硬件外部触发**：由前面板/后面板的 `INST TRIG` 外部 TTL 信号跳变触发。 |
 
 * **复位值（\*RST）**：`AUTO`。
@@ -265,9 +267,8 @@ graph TD
 :SOURce1:FREQuency:MODE LIST
 
 // 5. 此时外部输入 TRIG 信号上升沿，每来一个脉冲前进一步；
-// 亦可通过软件命令强制推进：
-:SOURce1:LIST:TRIGger:EXECute
-:SOURce1:LIST:INDex?                   // 查询当前停在哪个点
+// 本例不使用软件 EXEC 代替外部边沿；若改用软件触发，先将 source 设为 SINGle。
+:SOURce1:LIST:INDex?                   // R&S 索引查询；SGStudio 仅返回逻辑索引
 
 // 6. 停止并切回定频
 :SOURce1:FREQuency:MODE CW

@@ -2,9 +2,9 @@
 
 ### 0. 依据（观察）
 
-- H2 只有 `tx_config_mscan(fc[], level[], dwell[], int16 n)` / `tx_query_mscan(...)`：整表一次下发、硬件按 dwell 自主顺序执行、无当前点索引读回、点数不超过 32767。
+- H2 通过 `tx_config_mscan(fc[], level[], dwell[], int16 n)` / `tx_query_mscan(...)` 整表配置与回读：无当前点索引读回，点数不超过 32767。执行方式还受公共 trigger action 控制：Sweep 按 dwell 自动推进，Hop 按触发逐点推进。
 - UI、Core 服务和 SCPI 的 Draft 整表上限为 100000 个有效点；UI 自动数据源单次最多生成 20000 行。H2 一次只能执行 32767 点，因此在提交 `[STARt, STOP]` 选中范围时检查区间长度；超限只拒绝本次提交，不截断或丢弃完整 Draft。
-- H2 触发源作用于整段序列开始，不支持 R&S `STEP` 模式的“每个触发只前进一步”，也不支持 `INDex` 模式的硬件单点定位。
+- 2026-11-12 已接通 `STEP` → 公共 Hop，复用用户已实测的 GUI BUS + Hop 单步路径；SCPI 实际频谱、末点回绕和 EXT 边沿仍待人工验收。H2 没有按任意索引定位硬件输出点的 API。
 - 已有用户脚本大量采用 R&S List Mode 命令。兼容目标因此从“只保留本机真实能力”改为“R&S 命令面完整保留，本机能力按明确规则降级”。
 - 现有 SCPI 传输仍存在按换行切块、1024 字节输入缓冲和固定 100 ms 延时等问题，二进制列表下发前必须先改造传输和解析层。
 
@@ -35,13 +35,14 @@
 | `LIST:DWELl`、`LIST:DWELl:MODE` | 真实执行 | 支持全局驻留时间和逐点驻留时间模式 |
 | `LIST:INDex:STARt/STOP` | 真实执行 | 0-based 闭区间，映射现有 UI 的 1-based `rangeFrom/rangeTo` |
 | `LIST:INDex <n>` / `LIST:INDex?` | 接口兼容 | 缓存并查询逻辑索引；不改变硬件当前输出点，不宣称是设备实时索引 |
-| `LIST:RESet` | 接口兼容 | 将逻辑索引重置为 `INDex:STARt`；不操作 H2 当前点 |
-| `LIST:MODE AUTO` | 真实执行 | H2 按范围自动执行整张表 |
-| `LIST:MODE STEP\|INDex` | 接口兼容 | 设置命令静默接受并归一化为 `AUTO`；`MODE?` 返回实际生效值 `AUTO`，H2 按整张表执行 |
-| `LIST:TRIGger:SOURce AUTO` | 兼容映射 | 映射为内部/总线启动并连续运行 |
-| `LIST:TRIGger:SOURce SINGle` | 兼容映射 | 映射为 BUS 单次启动；一次触发执行一整张表，不是一个点 |
-| `LIST:TRIGger:SOURce EXTernal` | 兼容映射 | 映射公共外部触发源；一个外部边沿启动一整张表，不是一个点 |
-| `LIST:TRIGger:EXECute` | 兼容映射 | 等价于 `*TRG`，触发一次整表执行 |
+| `LIST:RESet` | 兼容映射 | 将逻辑索引重置为 `INDex:STARt`；STEP 模式且 MScan 运行中时强制重新下发扫描，H2 回到起点 |
+| `LIST:MODE AUTO` | 真实执行 | 映射公共触发动作 Sweep；H2 按范围自动执行整张表 |
+| `LIST:MODE STEP` | 真实执行 | 映射公共触发动作 Hop；每次 BUS/外部触发前进一点（2026-11-12） |
+| `LIST:MODE INDex` | 接口兼容 | 归一化为 `AUTO`（Sweep）；H2 没有跳到指定点的 API |
+| `LIST:TRIGger:SOURce AUTO` | 兼容映射 | 映射为总线启动并连续运行；不改触发动作 |
+| `LIST:TRIGger:SOURce SINGle` | 兼容映射 | 映射为 BUS 单次；AUTO 模式一次触发执行一整张表，STEP 模式前进一点 |
+| `LIST:TRIGger:SOURce EXTernal` | 兼容映射 | 映射公共外部触发源；AUTO 模式一个边沿执行一整张表，STEP 模式前进一点 |
+| `LIST:TRIGger:EXECute` | 兼容映射 | 与 GUI Single 同一入口；AUTO 下重新下发并执行一次整表，STEP 下配置未变时只发一次 BUS 触发 |
 | `LIST:RMODe LIVE\|LEARned` | 接口兼容 | 接受并缓存枚举，`RMODe?` 原样返回；两者使用同一套 H2 整表配置路径 |
 | `LIST:LEARn` | 兼容映射 | 等价于 `LIST:APPLy`：同步校验并提交不可变整表快照，设备下发和回读沿现有 runtime 链路异步完成 |
 | `LIST:RUNNing?` | 真实执行 | 返回 MScan 真实运行状态 `1` 或 `0` |
@@ -55,7 +56,7 @@
 - **Draft**：频率、功率、逐点 dwell、全局 dwell、dwell 模式和扫描范围。三列可在编辑过程中暂时长度不一致。
 - **Submitted**：从某一 Draft revision 完整校验后，按 `[STARt, STOP]` 复制得到的不可变点表，并绑定设备 UID 与 capability revision。后续 Draft 修改不影响已经生成的 Submitted。
 - **Applied**：`LIST:APPLy`、`LIST:LEARn` 或 `FREQuency:MODE LIST` 对应的异步设备操作成功并完成回读后形成。命令处理阶段同步校验列长、范围、有限值、dwell、选中区间不超过 32767 点和设备能力，并在返回前生成只包含 `[STARt, STOP]` 范围的不可变提交快照；后续 Draft 修改不得改变已提交的快照。
-- **Compatibility State**：仅为 R&S 脚本往返查询保存 `LIST:INDex`、`LIST:RMODe` 和逻辑文件名等值，不作为硬件真实状态。`LIST:MODE` 不保存无法生效的请求值，其有效状态恒为 `AUTO`。
+- **Compatibility State**：仅为 R&S 脚本往返查询保存 `LIST:INDex`、`LIST:RMODe` 和逻辑文件名等值，不作为硬件真实状态。`LIST:MODE` 不单独保存状态，直接读写公共触发动作（`CommonDeviceProfile::triggerAction`）。
 
 Draft、Submitted、Applied 和上述 Compatibility State 的拥有者为 Core 级 `MScanTableService`。`ListModePanel` 和 SCPI 都是它的客户端；SCPI 不调用面板。设备提交仍通过 `TxSessionService` 完成。
 
@@ -64,6 +65,8 @@ Draft、Submitted、Applied 和上述 Compatibility State 的拥有者为 Core �
 数据 Apply 与设备执行确认是两个阶段：编辑页 Apply 完成 Draft → Submitted 的数据提交，RF OFF 时也可以成功；Home 的 `Data applied` 只表示 Submitted.valid 且其 draftRevision 与当前 Draft 一致，不依赖 RF、扫描 Enabled 或 Applied。设备 UID/capability 的运行态绑定检查继续留在原提交/执行链路，不归入“用户有新编辑未 Apply”的判断。设备成功后的实际点表仍记录到 Applied / runtime effective request。
 
 2026-10-22：主 Sweep 页 MScan 的 Enabled 控件以 `Submitted.valid` 为可用条件。没有已校验提交的点表时控件禁用，仅编辑 Draft 不开放；Apply 成功后开放但不自动 ON。用户从 ON 的 FScan/LScan 切到无有效 Submitted 的 MScan 时，先关闭使能，再禁用控件；切回 F/L 重新开放且保持 OFF。`submittedChanged` 同步刷新控件，提交被重置时关闭当前 MScan。已有合法 Submitted 不因后续未 Apply 编辑而失效；普通启用/类型切换不再由 MainWindow 自动提交 Draft。配置恢复的程序化 ON 意图仍保留，TxSessionService 在设备能力就绪后准备缺失/设备绑定过期的提交。SCPI 选择/使能前的同步 prepare 语义不变。实现仅静态核对，见 [TaskLog](../TaskLog/2026-10-22_gate-mscan-enable-on-submitted-table.md)。
+
+2026-11-12：`ListModePanel` 在 Draft 发布成功、服务 Draft 同步以及 `submittedChanged` 后统一刷新非空表格的 Apply 状态：没有有效 Submitted 或其 `draftRevision` 不等于当前 Draft revision 时开放 Apply，否则关闭按钮和呼吸动画。解决 Last State 恢复 FScan/LScan 或 Sweep OFF、表格有数据却没有提交时 Apply 仍灰色的问题；MScan ON 启动补提交成功后也会收起 Apply。沿用原空表处理、交互编辑合并发布及 `m_previewApplyInProgress` 对内部预览回写的抑制；状态刷新不生成 Submitted，不依赖 RF/Applied，也不放宽 Enabled 门控。仅静态核对，待构建及现场验收，见 [TaskLog](../TaskLog/2026-11-12_analyze-mscan-apply-after-fscan-last-state.md)。
 
 MScan 的运行态 `applyCarrierPlanWriteback()` 不再把设备点值写进编辑表或重新发布 Draft；编辑态 preview 的归一化保留。此前 H2 的 float 功率/dwell 回读经该 UI 路径改变 double Draft，产生新 revision，但 Apply 按钮被 preview guard 抑制，导致用户已经 Apply 后开启 RF 又提示需要 Apply、必须先编辑一行。该边界错误已修复，不加浮点容差、不自动重提，用户在执行期间的新编辑也不再被运行态回写覆盖。见 [修复 TaskLog](../TaskLog/2026-10-13_separate-mscan-data-apply-from-device-confirm.md)。
 
@@ -161,7 +164,7 @@ CarrierPlan/FrequencyMode/Running 状态由 `TxSessionService` 统一持有，�
 - `LIST:CLEar` 清空 Draft 三列。
 - `LIST:APPLy` 同步完成校验和不可变快照提交，整表下发与设备回读继续使用现有异步 runtime 链路；`LIST:LEARn` 是它的 R&S 兼容别名。
 - `LIST:APPLied?` 返回设备回读的已生效列。
-- `LIST:MODE:CATalog?` 返回当前设备真正支持的 List 执行模式，首版固定返回 `AUTO`。
+- `LIST:MODE:CATalog?` 返回当前设备真正支持的 List 执行模式；若实现，应返回 `AUTO,STEP`。
 - `INITiate:CONTinuous` 可供 SGStudio 原生脚本显式选择单次或连续运行，但 R&S 脚本优先使用 `LIST:TRIGger:SOURce`。
 
 ### 6. 不支持能力的精确定义
@@ -171,17 +174,27 @@ CarrierPlan/FrequencyMode/Running 状态由 `TxSessionService` 统一持有，�
 - `LIST:INDex <n>` 校验 `n` 位于当前 Draft 列表范围内，然后保存为逻辑索引。
 - `LIST:INDex?` 返回最后设置的逻辑索引。
 - `LIST:RESet` 将逻辑索引设置为 `LIST:INDex:STARt`。
-- 这三个操作不调用 H2，不改变正在输出的点，也不用于生成 Applied 快照。
+- INDEX 设置/查询不调用 H2，不改变正在输出的点，也不用于生成 Applied 快照。
+- RESET 在 MScan 已运行且公共动作为 Hop 时，通过 `TxSessionService::requestScanRestart()` 失效已有硬件配置并异步重下发当前 Submitted 扫描；BUS 下配置自带一次触发，回到已提交子范围起点。EXT 下只重新布防，不补发 BUS 触发。该操作不重新提交尚未 Apply 的 Draft 编辑。
+- RESET 在 AUTO/Sweep 或尚未运行时仍只重置逻辑索引；不应宣称已完整实现 R&S 通用“回到列表起点”的硬件语义。此项不随本次 STEP 接入扩大实现范围。
 
 #### 6.2 `LIST:MODE STEP|INDex`
 
-- `AUTO`、`STEP`、`INDex` 都是合法参数，设置命令均返回成功，且不产生任何 SCPI 响应数据。
-- 设置 `STEP` 或 `INDex` 时不写入 SCPI 错误队列，内部直接归一化为 `AUTO`；可以记录诊断日志说明发生了降级。
-- `LIST:MODE?` 始终返回实际生效模式 `AUTO`，不回显无法生效的请求值。
-- `LIST:MODE:CATalog?` 固定返回 `AUTO`，供新脚本在设置前查询设备能力。
-- H2 的执行模式恒为整表 `AUTO`：`STEP` 不会逐触发前进一步，`INDex` 不会只输出逻辑索引指定的点。
-- 切入 `FREQuency:MODE LIST` 时不得因为模式是 `STEP` 或 `INDex` 而拒绝应用。
+2026-11-12 起 `STEP` 真实生效，见 [TaskLog](../TaskLog/2026-11-12_scpi-list-mode-step.md)。
+
+- `AUTO` 设置公共触发动作为 Sweep，`STEP` 设置为 Hop，`INDex` 归一化为 Sweep。设置命令不产生响应数据，不写错误队列。
+- `LIST:MODE?` 在 Hop 时返回 `STEP`，否则返回 `AUTO`。
+- `LIST:TRIGger:SOURce` 只改触发源和次数，与 `LIST:MODE` 先后顺序无关。
+- STEP + SINGLE 执行：`LIST:TRIG:EXEC` 在配置未变且硬件配置已确认时只发一次 `channel_bus_trigger`，前进一点；配置变化时完整下发，BUS 下自带一次触发，起点立即输出。EXT 下配置只布防，每个有效外部边沿的逐点行为待实测；不要把 EXT 下的 EXEC 当成 BUS 单步入口。
+- STEP 下驻留时间不起作用；提交校验仍要求三列等长。
+- `LIST:TRIG:SOUR AUTO` 明确设置 BUS 源和 count=−1；STEP 下在没有后续有效 BUS 触发时，启动后保持起点，软件 EXEC 也不强制执行。不拒绝该组合，以免打断常见命令顺序。该表现不能泛化为 STEP 与连续响应不兼容。
+- 公共 source、count、action 独立：若通过 GUI 或 `TRIG:SEQ:SOUR XPPS` 改为可用 XPPS，并保留 count=−1、Hop，则每个有效脉冲可前进一步，1 Hz 对应每秒一步。此时实际源已不是 List source AUTO 映射的 BUS；重发 `LIST:TRIG:SOUR AUTO` 会覆盖 XPPS 并切回 BUS。
+- Streaming + MScan 固定按 Sweep 下发，回写后 `LIST:MODE?` 为 `AUTO`。
+- `INDex` 不会只输出逻辑索引指定的点；`LIST:INDex?` 不反映 STEP 当前硬件点。
+- 切入 `FREQuency:MODE LIST` 时不得因为模式是 `INDex` 而拒绝应用。
 - `*OPC?` 只表示命令处理完成，不能用于判断请求模式是否受支持。
+
+2026-11-12 语义复核：R&S 官方 [List MODE / RESET](https://rssmcv.readthedocs.io/en/latest/Source_ListPy.html) 与 [Trigger Source](https://rssmcv.readthedocs.io/en/latest/Source_ListPy_Trigger.html) 的核心契约是 AUTO 每触发整轮、STEP 每触发一步，MODE 与 source 独立。Source AUTO/IMMediate 的适用模式只列 AUTO；SINGLE/BUS 与 EXT 都适用 AUTO/STEP。因此接受 STEP + AUTO 作为过渡配置、不替用户强制改模式是当前兼容策略，不能解释为 R&S 的有效运行组合。SGStudio 尚不接受 BUS/IMMediate 这两个 List source 别名，也未注册 *TRG。所核对的 R&S MODE 参数为 AUTO/STEP；INDex 是本项目保留的兼容参数，不能泛称所有 R&S 型号均支持该模式枚举。官方命令说明不足以确定所有 R&S 型号的首次触发点位时序，原 TaskLog 中“R&S 首个触发才输出起点”不作为已证实结论；这里只保证如实说明 SGStudio 的启动 BUS 触发行为。
 
 #### 6.3 `LIST:RMODe` 和 `LIST:LEARn`
 
@@ -221,16 +234,19 @@ CarrierPlan/FrequencyMode/Running 状态由 `TxSessionService` 统一持有，�
 :SOURce1:LIST:RUNNing?
 ```
 
-不支持的 R&S 步进脚本也能完成命令解析和查询，但执行仍是整表模式：
+R&S 步进脚本（2026-11-12 起 STEP 生效）：
 
 ```scpi
 :SOURce1:LIST:MODE STEP
-:SOURce1:LIST:MODE?          // 返回 AUTO，表示实际生效模式
-:SOURce1:LIST:MODE:CATalog?  // 返回 AUTO，表示当前仅支持 AUTO
-:SOURce1:LIST:INDex 2
-:SOURce1:LIST:INDex?         // 返回 2，属于逻辑索引
-:SOURce1:LIST:RESet
-:SOURce1:LIST:INDex?         // 返回 INDex:STARt
+:SOURce1:LIST:TRIGger:SOURce SINGle
+:SOURce1:LIST:MODE?          // 返回 STEP
+:SOURce1:LIST:LEARn
+:SOURce1:FREQuency:MODE LIST // 起点立即输出
+:SOURce1:LIST:TRIGger:EXECute // 前进一点
+:SOURce1:LIST:RESet          // 回到起点，逻辑索引回到 INDex:STARt
+:SOURce1:LIST:INDex?         // 返回 INDex:STARt，属于逻辑索引
+:SOURce1:LIST:MODE INDex
+:SOURce1:LIST:MODE?          // 返回 AUTO，INDex 不支持
 ```
 
 ### 8. SCPI 底层最小改造方案

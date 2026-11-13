@@ -91,7 +91,7 @@ Get-Content -Encoding UTF8 -LiteralPath "$kb\listmode_scpi调试指南.md" | Sel
 - [Arb 编辑需求与最小分段表设计](arb_editor_requirements_and_segment_table_design.md)：模板/快速库入口与 A/B/C/D/E 单路任务、Hold/Ramp/Data、按任务划分重采样边界及线性边沿语义；[交互简版](arb_editor_minimum_model_and_user_interaction.md)：保留原 A/B/D/E/F 编号的五类操作说明；均为尚未实施方案。
 - [TrueArb 硬件契约与七类波形算法](awg_truearb_waveform_algorithms_and_arb_editing.md)：C0 设备契约与算法；Amplitude、DC Offset、HighZ/50 Ω/Custom 负载含义及 CSV 导出恢复、预期播放电压；含 Pulse 参数联动与 DC 参数收敛（已实现、静态核对）、Noise 参数与算法调研（维持现状）、B0 对比与厂商调研。
 - [Digital 交互入口](digital_modulation_user_interaction_flow.md)：SPS、异步生成、截断、Instrument 截断选项触控尺寸与 SVG 留白、reset；2026-11-11 Save IQ 确认/选路径/预检后释放缓存、后台完整导出与真实写盘进度（静态实施，待运行验收）。
-- [Multitone 算法入口](htra_multitone_current_algorithm_and_vsg60_boundaries.md)：tone / notch / phase / AutoScale / 精确周期约简 / preview；Fixed 与 LScan 的 LO 遮盖 center 补偿（偶数音固定 s/2，奇数音禁中心/陷波时动态）；Main/Minibar Count 2..1024 与一致的表格处理规则，两端 1024 音改单音已用户实测通过。
+- [Multitone 算法入口](htra_multitone_current_algorithm_and_vsg60_boundaries.md)：tone / notch / phase / AutoScale / 精确周期约简 / preview；中心音遮盖固定为内部 true 常量，不对外开放、不存 JSON，Preset/旧 false 文件不能关闭（静态实施，待验收）；Fixed 与 Playback F/L/MScan 的 LO 频率补偿（下发加偏移、回写减偏移，切换 CW/奇数音不残留）；Main/Minibar Count 2..1024 与一致的表格处理规则，两端 1024 音改单音已用户实测通过。
 - [Multitone 与 VSG60 对比](multitone_vsg60_three_case_comparison_and_playback_consistency.md)：三组样本与 Playback 一致性。
 - [iqtone.m 借鉴候选](htra_multitone_iqtone_reuse_candidates.md)：历史参考、后续优化建议。
 - [Multitone / Pulse RMS 原理](htra_rms_power_multitone_pulse_principle.md)：PEP、占空比与双 32767 参考；厂商实践、Pulse 保持 Level/RMS 只读平均功率（已静态实施、标签布局不变），以及 AM/Ramp 功率参考边界。
@@ -106,8 +106,8 @@ Get-Content -Encoding UTF8 -LiteralPath "$kb\listmode_scpi调试指南.md" | Sel
 ## E-scpi
 
 - [入口：SCPI 接入审阅与方案](scpi_review_and_integration_plan.md)：TX/UI 回写、错误语义、ScpiIntentService 迁移；LOAD/SAVE、images 截图、JSON 相对资源路径与 RMS/basic-only；幅度补偿 CORR **9 类功能、13 入口使用说明**：长短写、参数/响应、dB、草稿提交、逻辑名称、VAL?、ASCII/REAL64 示例与错误码。旧版测试 7/7 组通过，当前精简为 3 组；GUI/Reset/扫描/射频待验收。
-- [ListMode 命令调试入口](listmode_scpi调试指南.md)：TCP 5025、命令表、查询响应、逐点/全局活动驻留判据、SCPI 选择/使能 MScan 的预检与历史 R&S 实测流程。
-- [ListMode 接口设计](listmode接口实现.md)：含 GUI MScan 与 SCPI 共用的 Draft/Submitted/Applied、数据 Apply 与设备执行分离、Enabled 按钮门控、真实执行与兼容映射边界。
+- [ListMode 命令调试入口](listmode_scpi调试指南.md)：TCP 5025、命令表、驻留判据、STEP/Hop 与 RESET 边界；1 GHz/500 MHz span、历史 R&S 实测流程。
+- [ListMode 接口设计](listmode接口实现.md)：含 GUI MScan 与 SCPI 共用的 Draft/Submitted/Applied、数据 Apply 与设备执行分离、Last State 恢复后的 Apply 状态同步、Enabled 按钮门控、真实执行与兼容映射边界。
 - [R&S List Mode 参考](rs_list_mode_scpi_reference.md)：R&S 的 listmode scpi命令、触发、索引、学习与文件容器。
 
 ## F-sweep

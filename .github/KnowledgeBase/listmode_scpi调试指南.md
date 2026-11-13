@@ -41,7 +41,7 @@ ASCII 适合端口助手；批量脚本也可使用 IEEE 488.2 定长块 `#<位�
 | `LIST:INDex:STARt` / `LIST:INDex:STARt?` | 设置／查询，整数 | 选中区间起点，0-based |
 | `LIST:INDex:STOP` / `LIST:INDex:STOP?` | 设置／查询，整数 | 选中区间终点，包含此点 |
 | `LIST:INDex` / `LIST:INDex?` | 设置／查询，整数 | 兼容用逻辑索引；不会定位硬件输出点 |
-| `LIST:RESet` | 无参数事件 | 将逻辑索引恢复为 STARt；不会重启硬件扫描 |
+| `LIST:RESet` | 无参数事件 | 将逻辑索引恢复为 STARt；STEP 模式且 MScan 运行中时重新下发扫描，输出回到起点 |
 
 `STARt/STOP` 真正控制执行范围，例如 `1..3` 执行原表第 2～4 行。修改范围后重新 LEARn 并启动；不是向 `INDex` 写入一个值来移动硬件指针。
 
@@ -49,19 +49,30 @@ ASCII 适合端口助手；批量脚本也可使用 IEEE 488.2 定长块 `#<位�
 
 | 命令 | 类型／参数 | 当前行为 |
 |---|---|---|
-| `LIST:MODE` / `LIST:MODE?` | `AUTO` / `STEP` / `INDex` | 三种设置均接受，实际始终 AUTO；查询返回 `"AUTO"` |
+| `LIST:MODE` / `LIST:MODE?` | `AUTO` / `STEP` / `INDex` | STEP 设置公共触发动作为 Hop，AUTO/INDex 设置为 Sweep；查询在 Hop 时返回 `"STEP"`，否则 `"AUTO"` |
 | `LIST:RMODe` / `LIST:RMODe?` | `LIVE` / `LEARned` | 保存并回读兼容枚举；LIVE 没有实时硬件实现，使用 LEARned 调试 |
 | `LIST:LEARn` | 无参数事件 | 校验草稿并生成不可变提交快照；已处于 LIST 时请求异步刷新 |
 | `LIST:TRIGger:SOURce` / `LIST:TRIGger:SOURce?` | `AUTO` / `SINGle` / `EXTernal` | 设置／查询共用触发配置，具体映射见下表 |
-| `LIST:TRIGger:EXECute` | 无参数事件 | 在 LIST 模式下请求软件触发；一次执行整个选中范围 |
+| `LIST:TRIGger:EXECute` | 无参数事件 | 在 LIST + SINGLE 下请求软件触发；AUTO 一次执行整个选中范围，STEP 在配置稳定时一次前进一点 |
 | `LIST:RUNNing?` | 查询，`0` / `1` | 当前载波计划为 MScan 且已应用 MScan 扫描管线时返回 1 |
 | `FREQuency:MODE` / `FREQuency:MODE?` | `CW` / `LIST` | 选择固定载波／MScan；LIST 校验并提交点表、请求异步刷新 |
 
 | List 触发源 | 共用业务层映射 | 执行方式 |
 |---|---|---|
-| `AUTO` | BUS，count = −1，action = SWEEP | 按选中范围自动循环 |
-| `SINGle` | BUS，count = 1，action = SWEEP | 软件触发一次执行选中范围，不是单步 |
-| `EXTernal` | EXTERNAL，count = 1，action = SWEEP | 外部触发一次执行选中范围，不是单步 |
+| `AUTO` | BUS，count = −1 | AUTO 模式按选中范围自动循环；STEP 下不自动推进，见下文限制 |
+| `SINGle` | BUS，count = 1 | 软件触发；AUTO 模式执行一次选中范围，STEP 模式前进一点 |
+| `EXTernal` | EXTERNAL，count = 1 | 外部触发；AUTO 模式执行一次选中范围，STEP 模式前进一点 |
+
+`LIST:TRIGger:SOURce` 只设置触发源和次数，不改触发动作；动作由 `LIST:MODE` 决定（STEP = Hop，AUTO/INDex = Sweep），两条命令先后顺序不影响结果。
+
+STEP 模式说明（2026-11-12）：
+- RF 开启且选择 BUS 时，进入 LIST 或运行中 STEP 的 `LIST:RESet` 会完整下发扫描，下发自带一次 BUS 触发，起点立即输出；SINGLE 下之后每次 `LIST:TRIG:EXEC` 前进一点。EXT 下完整下发只布防，不补发 BUS 触发。不能仅凭通用 R&S 命令说明断言所有型号“首个触发才输出起点”。
+- 驻留时间在 STEP 下不起作用，但提交校验仍要求三列等长。
+- `LIST:TRIG:SOUR AUTO` 会将实际触发源设为 BUS、count 设为 −1；搭配 STEP（Hop），且没有后续有效 BUS 触发时，启动后停在起点。`EXEC` 此时也不会推进（现有软件 Single 执行入口要求 count=1）。这只是该 BUS 配置的表现，不能推导为“STEP 与连续响应不兼容”。R&S 触发源适用表只为 MODE AUTO 列出 AUTO/IMMediate，接受该命令组合是本项目保留命令顺序的兼容策略。
+- STEP（Hop）规定每个有效触发前进一步；若通过 GUI 或公共命令 `TRIG:SEQ:SOUR XPPS` 将实际触发源改为可用的 XPPS，并保留连续响应（count=−1），则可随每个 XPPS 脉冲推进一点，1 Hz 对应每秒一点。此时已是 XPPS＋Hop＋连续响应；再次执行 `LIST:TRIG:SOUR AUTO` 会把源切回 BUS，并非保留 XPPS 只修改次数。
+- Streaming + MScan 固定按 Sweep 下发，回写后 `LIST:MODE?` 变为 `AUTO`。
+- `LIST:INDex?` 仍是逻辑索引，不反映 STEP 当前硬件点。
+- `LIST:RESet` 仅在已运行的 STEP 下重下发硬件；AUTO 下仍只重置逻辑索引，不是完整的 R&S RESET 行为。若 Draft 范围尚未重新 LEARn，RESET 重启的是当前 Submitted 范围，逻辑索引则按当前 Draft STARt 重置。
 
 List 和公共 Trigger/UI 使用同一份配置，修改一方会影响另一方。当前 List 参数只接受上表三种名称，不把 `BUS`、`IMMediate` 当作 List 参数别名。公共触发配置无法用 List 枚举表示时，查询可能返回 `-221` 错误。
 
@@ -94,7 +105,8 @@ List 和公共 Trigger/UI 使用同一份配置，修改一方会影响另一方
 兼容的是上述命令头、长短写、三列写入、单位、子范围和触发操作习惯，不能理解为 R&S 全部 SCPI 及硬件行为完全等价。
 
 - **可直接沿用**：三列 ASCII 写入、点数查询、全局／逐点 dwell、0-based 闭区间、AUTO 自动执行及 LEARned 风格命令组合。
-- **接受但有降级**：STEP/INDEX 设置成功后 `MODE?` 仍为 AUTO；设置命令不会额外返回“不支持”文本，也不会因此进入错误队列。依赖单步的脚本必须调整。
+- **STEP 可用**：`LIST:MODE STEP` 配合 SINGle/EXTernal 每次触发前进一点，差异见 2.3 节“STEP 模式说明”。
+- **接受但有降级**：INDEX 设置成功后 `MODE?` 为 AUTO；设置命令不会额外返回“不支持”文本，也不会因此进入错误队列。
 - **仅保存兼容状态**：逻辑 INDEX、RMODE 和文件名称。其中 `RMODe LIVE` 回读 LIVE 不代表硬件具备 LIVE 能力。
 - **学习时序不同**：当前 LEARn 是软件校验和快照准备；从 CW 状态调用不单独完成硬件预学习。选择 LIST、开启 RF 后沿现有异步设备配置链路应用，不能把 LEARn 的返回视作 PLL/ALC 已逐点学习完成。
 - **尚未提供的设计项**：当前注册表没有 `LIST:APPLy`，调试请使用 `LIST:LEARn`；也不要照搬 `FORMat` 或独立文件持久化命令。
@@ -206,9 +218,9 @@ LIST:RUNN?
 
 查询应为 EXTERNAL，配置完成后施加外部触发。本场景是调试步骤，尚未以本轮 TCP 回归确认外部边沿和波形行为。
 
-### 场景 E：验证 R&S 兼容降级与文件名称接口
+### 场景 E：验证 R&S 兼容模式与文件名称接口
 
-复用已有点表，先停止输出。STEP 设置不报错，但查询应明确返回 AUTO；文件目录只有逻辑名称。
+复用已有点表，先停止输出。STEP 查询返回 STEP，INDex 归一化为 AUTO；文件目录只有逻辑名称。
 
 ```scpi
 OUTP:STAT OFF
@@ -226,9 +238,26 @@ LIST:CAT?
 *ERR?
 ```
 
-两次 MODE 查询均为 `"AUTO"`；目录先为 `"debug_list.lsw"`，删除后为 `""`。点表内容不因名称删除而清空。
+两次 MODE 查询依次为 `"STEP"`、`"AUTO"`；目录先为 `"debug_list.lsw"`，删除后为 `""`。点表内容不因名称删除而清空。
 
-### 场景 F：空表与常见错误（排查“为什么进不了 LIST”）
+### 场景 F：STEP 单步推进（复用场景 C 的点表）
+
+```scpi
+OUTP:STAT OFF
+FREQ:MODE CW
+LIST:MODE STEP
+LIST:TRIG:SOUR SING
+LIST:LEAR
+FREQ:MODE LIST
+OUTP:STAT ON
+LIST:MODE?
+LIST:TRIG:SOUR?
+LIST:RUNN?
+```
+
+确认 MODE 为 STEP、触发源为 SINGLE、Running 为 1。此时起点已输出。之后每发一次 `LIST:TRIG:EXEC` 前进一点；发 `LIST:RES` 后输出回到起点。需在频谱仪上观测实际频点。
+
+### 补充：空表与常见错误（排查“为什么进不了 LIST”）
 
 `*ERR?` 每次只取出一条错误，每条失败命令后读一次；预期结果见表格。
 
@@ -338,4 +367,5 @@ FREQ:MODE?
 - 点表、兼容状态与提交校验：`src/plugins/core/mscantableservice.cpp`。
 - 模式选择及 Running 判定：`src/plugins/core/txsessionservice.cpp`。
 - 本地设计参考：[ListMode 接口实现](listmode接口实现.md)、[R&S ListMode 参考](rs_list_mode_scpi_reference.md)。本指南按当前代码注明与设计／参考的差异。
+- R&S 核对来源：[MODE / RESET](https://rssmcv.readthedocs.io/en/latest/Source_ListPy.html)、[Trigger Source](https://rssmcv.readthedocs.io/en/latest/Source_ListPy_Trigger.html)、[Index](https://rssmcv.readthedocs.io/en/latest/Source_ListPy_Index.html)。这些说明支持模式/source 正交与每触发一步，不足以替代目标 R&S 型号的首次触发时序对测。
 - 已执行回归：4097 点 ASCII、4097 点 REAL,64、LEARned 列长校验；RF、ListMode UI 回显已由用户确认。基础用例仍有 float dwell 精度容差待调整，不能宣称全部断言通过。
