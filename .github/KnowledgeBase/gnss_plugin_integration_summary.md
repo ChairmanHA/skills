@@ -98,7 +98,8 @@ GNSS 现在确实放进了 `CommonDeviceProfile`，但它承担的是“缓存 o
 
 - `currentDeviceOpenStateChanged` 时同步连接态，其中 `true` 时刷新 GNSS 配置。
 - `BusinessManager::currentActivedBusinessChanged` 检测到 `Streaming` 时禁用配置控件。
-- 每次 GNSS 实时状态刷新或 XPPS 配置写回后，都会重刷一次 TriggerSource feature specs；若 XPPS 因 `pps_en=0` 或失锁而失效，公共 `TriggerSource` 会默认退化到 `BUS`。
+- Trigger In 的 XPPS 选项随 HTRA 设备能力发布。GNSS 锁定和 XPPS 输出状态都不影响可选择性，实时状态和配置写回无需重刷 TriggerSource 选项。
+- 选择 XPPS 后，状态栏优先显示「xpps输出未开启，无触发输入。」。输出开启时，GNSS 未锁定显示「GNSS 未锁定，无触发输入。」。锁定恢复或切换触发源时清除告警。Streaming 继续暂停 GNSS 状态轮询。
 
 这里要区分两条链：
 
@@ -107,15 +108,11 @@ GNSS 现在确实放进了 `CommonDeviceProfile`，但它承担的是“缓存 o
 
 因此“默认/preset/load 驱动的 GNSS 设备下发”和“前端 UI 显示设备实际接受值”是两条相邻但分离的链路。
 
-这里的退化策略是“只降级，不自动恢复”：当 XPPS 重新可用时，系统不会偷偷把当前触发源从 `BUS` 自动切回 `XPPS`，避免改写用户当前意图。
-
 ### XPPS Sweep 单次的现场确认（2026-10-29）
 
 用户实测并向 API 方确认：XPPS + Sweep + Single 时，每个脉冲完整扫一轮，扫完等待下一脉冲再开始新一轮，无需每轮重新点击 Single。单轮耗时 `t < 1/f` 时，启动间隔约 `1/f`，轮后等待约 `1/f - t`；1 Hz 时即 `1 s - t`。这符合当前 API 行为，不应仅凭 `response_count = 1` 的头文件注释判为后续脉冲必须被忽略。完整计数说明和证据边界见 [H2 API 参考 13.4](htra_h2_api_v2_0_usage.md#134-xpps-触发)。
 
-用户同时确认拔天线失锁、关闭 XPPS Out 两种情况下均会回退 BUS；
-
-2026-10-30 修复：此前回退只改了 `CommonDeviceProfile` 和属性值，未发 `profileChanged()`，硬件仍保持 XPPS 触发（失锁后 XPPS 仍在输出时会继续逐脉冲扫描）。现在 `setFeatureSpec()` 在归一化改变触发源时发出 `profileChanged()`，由 `TxSessionService` 重新下发 BUS 配置；Sweep Single 下会因 BUS 武装时的 `channel_bus_trigger` 再扫一轮后停止。
+2026-10-29 现场曾确认旧版本拔天线失锁和关闭 XPPS Out 时均回退 BUS。2026-11-18 移除了这两个状态对触发源的影响，应用保留 XPPS 并更新状态栏告警。该变更已静态核对。
 
 ## 当前剩余不足
 

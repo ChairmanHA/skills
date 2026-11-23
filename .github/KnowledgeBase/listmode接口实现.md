@@ -70,6 +70,8 @@ Draft、Submitted、Applied 和上述 Compatibility State 的拥有者为 Core �
 
 MScan 的运行态 `applyCarrierPlanWriteback()` 不再把设备点值写进编辑表或重新发布 Draft；编辑态 preview 的归一化保留。此前 H2 的 float 功率/dwell 回读经该 UI 路径改变 double Draft，产生新 revision，但 Apply 按钮被 preview guard 抑制，导致用户已经 Apply 后开启 RF 又提示需要 Apply、必须先编辑一行。该边界错误已修复，不加浮点容差、不自动重提，用户在执行期间的新编辑也不再被运行态回写覆盖。见 [修复 TaskLog](../TaskLog/2026-10-13_separate-mscan-data-apply-from-device-confirm.md)。
 
+2026-11-13：现场报告已有生效频表时加载项目，新 Draft 先显示并提示 Apply，稍后又被旧表覆盖；先 Preset 再加载也无效。当前源码仍有上述运行态到编辑表的回写，本次移除。同时，`StepSweepPanel::resetToDefault()`（Preset、项目恢复及初始默认恢复共用）调用现有 `MScanTableService::reset()`，清除旧 Draft / Submitted / Applied / Compatibility State，再恢复目标配置；不能只清空界面而保留旧 Submitted。恢复 MScan ON 时，原延迟提交路径使用新加载的 Draft；恢复 FScan/LScan 或 Sweep OFF 时，新表保持待显式 Apply。普通编辑、Draft 清空和扫描类型切换继续保留有效 Submitted，不作为完整项目重置。仅静态核对，未构建或设备验收，见 [TaskLog](../TaskLog/2026-11-13_fix-listmode-config-draft-overwrite.md)。
+
 CarrierPlan/FrequencyMode/Running 状态由 `TxSessionService` 统一持有，普通 UI refresh 不得从面板反推并覆盖它；List Trigger 直接读写唯一的 `CommonDeviceProfile` trigger source/count/action。`MScanTableService` 不保存这两类状态，也不提供 request-local trigger decorator。
 
 复位默认值：

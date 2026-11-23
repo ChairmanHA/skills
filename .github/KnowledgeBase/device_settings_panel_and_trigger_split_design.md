@@ -21,12 +21,13 @@
 
 ## 3. 页面结构
 
-桌面 Main 页面使用 2 列 Grid，顶部仍是 2x2 主布局，右下角 `RF Hardware` 下方再追加一个独立 group：
+桌面 Main 页面使用两列网格，顶部保留 2×2 主布局。第三行左列是 `Amplitude Compensation`，右列是调试时可见的 `Fan Control`。
 
 - Reference Clock
 - Trigger In
 - Trigger Out
 - RF Hardware
+- Amplitude Compensation
 - Fan Control
 
 各 group 的当前语义如下。
@@ -121,7 +122,7 @@ Hop/Sweep 可用性由 `CommonDeviceProfile` 的输出源属性回调统一更�
 - LO Mode
 - Fan Mode
 
-`RF Hardware` 的第一行放置 `LO Mode` 与 `Low Power`，各占一列；第二行左侧保留 `RF Output Port`。`Fan Control` 仍是 RF Hardware 之后最后追加的独立 group，并继续遵守现有 debug-only 可见性策略；第二行使用普通文本标签与 `QLineEdit` 编辑 Auto 阈值。
+`RF Hardware` 第一行放置 `LO Mode` 和 `Output Port`，第二行左侧放置 `Low Power`。`Amplitude Compensation` 位于 `Trigger Out` 下方，开关和补偿表入口各占一列，错误提示位于两者下方。`Fan Control` 位于 `RF Hardware` 下方，第二行使用普通文本标签与 `QLineEdit` 编辑 Auto 阈值。
 
 ## 4. 为什么 Trigger 必须拆成 In / Out
 

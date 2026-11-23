@@ -688,7 +688,7 @@ Sweep 这组 API 说明：
 
 - `device_config_clock(void** device, referenceclock_source source, double fref, state out)`
 - `device_query_clock(void** device, referenceclock_source* source_o, double* fref_o, state* out_o, state* locked_o)`
-- `device_reset_clock_monitor(void** device)`
+- `device_reset_clock_monitor(void** device)`：当前随库 2.1.42 二进制导出，但当前 `h2_api.h` 未声明，SGStudio 未调用。
 
 业务语义：
 
@@ -698,7 +698,15 @@ Sweep 这组 API 说明：
 
 软件设计含义：参考时钟属于设备级公共配置，应该放在统一公共 profile 中，而不是由某个 TX provider 自己偷偷维护。
 
-当 `locked_o` 指示系统时钟监控已进入异常态时，软件可把 `device_reset_clock_monitor()` 视为一次显式恢复动作，而不是隐式塞进普通 apply 流程。
+监控复位的作用与使用条件需由 SDK 方确认；不能因为存在上述导出就假定普通切源必须复位或复位能够重锁 PLL，也不应隐式塞进普通 apply 流程。
+
+#### 13.1.1 随库 2.1.42 的 clock 查询语义（2026-11-16 静态核对）
+
+- `device_config_clock` 发送 0x37，经 USB 写传输返回；没有等待 PLL 锁定或设备应用完成确认。不能把配置返回成功等同于已锁定。
+- `device_query_clock` 通过设备交互依次读取配置 0xCA、频率监测 0xA1、锁定状态 0x87。External 的频率输出为设备配置频率乘以 `(1 + monitor_ppm × 1e-6)`，并非原样回显用户标称设定。当前 SGStudio 配置完成和显式查询仍会把此值写入外参考频率记忆，因此再次切源时必须比较实际下发参数；同源周期观测的编辑保护不覆盖这两个入口。
+- `parse_rflocked_state` 将四个原始状态字节与主机上次值比较：0 视为锁定，1..254 相同视为锁定、变化视为本次未锁，0xFF 始终视为未锁。这是 SDK 的解析规则；字节的固件定义、饱和/复位语义需要底层确认。
+- 该版本 `device_query_clock` 的 `locked_o` 来自 DLREF/SYSCLK/ADDA/RFLO 的汇总查询是否返回 0；不能把它理解为独立的 SYSCLK 实时 PLL 位。仍须分别保留实际返回码与输出字段，不在应用层推导或改写 SDK 告警。
+
 
 ### 13.2 GNSS 配置
 
@@ -755,16 +763,7 @@ status = channel_start(ch);
 // 不调用 channel_bus_trigger，等待 XPPS 上升沿
 ```
 
-前提：使用 XPPS 之前，软件至少应满足以下条件：
-
-1. 先通过 `device_query_gnss()` / `device_config_gnss()` 确认 `pps_en == 1`，否则设备不会产生可供 XPPS 使用的秒脉冲。
-2. 再确认 `gnss_info.locked == STATE_ON`；如果未锁星，设备即使进入 armed 状态，也未必会有可靠的 XPPS 边沿到来。
-
-UI 层更稳妥的做法不是在下发阶段偷偷改写 XPPS 参数，而是直接把 Trigger In 的 XPPS 选项按这两个条件置灰；只有 `pps_en == 1 && locked == STATE_ON` 时才允许选中 XPPS。
-
-当前 SGStudio 的 HTRA 实现还会在 `FancyDevice::open()` 时做一次 GNSS bootstrap：设置 `pps_en = 1`，`device_config_gnss()`，随后再通过对话框侧的 `refreshGnssConfig()` 把设备最终接受值回显到 UI。
-
-一旦 XPPS 因失锁或 `pps_en = 0` 变为不可用，SGStudio 的公共 TriggerSource 会默认退化到 `BUS`，以保证后续 apply / reapply 仍有一个内部可执行的触发源；当 GNSS 恢复时不会自动切回 XPPS。
+SGStudio 允许直接选择 XPPS 并配置触发。输出由 `gnss_setting.state_pps_out` 控制，GNSS 锁定由 `gnss_data.is_locked` 提供。选中 XPPS 后，状态栏先检查输出开关，再在输出开启时检查锁定。关闭输出或失锁只更新应用告警，触发源保持 XPPS。详见 [GNSS 接入](gnss_plugin_integration_summary.md)。
 
 #### XPPS + Sweep + Single 的确认语义（2026-10-29）
 
@@ -774,7 +773,7 @@ UI 层更稳妥的做法不是在下发阶段偷偷改写 XPPS 参数，而是�
 
 SGStudio 点击 Single 时仍设置 `TriggerCount = 1`，设备层把次数写入 `stream_trigger.response_count`。此前仅凭头文件“响应有限个触发后停止响应”的注释推导“只响应第一个 XPPS 脉冲”的判断已撤回；这里记录 API 方确认的场景行为，不据此重定义其他模式的计数规则。扫描耗时达到或超过触发周期时的脉冲处理策略，本次未确认。
 
-用户另已实测：拔掉 GNSS 天线导致失锁、关闭 XPPS Out 均会自动回退 BUS。
+
 ### 13.5 供电、风扇与通道硬件公共设置
 
 相关 API：

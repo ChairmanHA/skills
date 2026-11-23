@@ -77,6 +77,27 @@ scripts\build_all.bat --watermark off
 `VectorCore.zip`。Linux 批量入口 `build_all.sh` 对 `ubuntu-x86_64`、`raspberry-pi`
 各构建相同六版本，共十二包，BNC 默认 `VectorCore.tar.gz`。
 
+### 2.3 批量打包后自动上传 FTP
+
+在运行批量脚本的机器上配置 `scripts/package_ftp.local.ini`。该文件由 Git 忽略。配置格式如下：
+
+```ini
+[ftp]
+host = 192.168.3.26
+username = harogic
+password = <填写 FTP 密码>
+remote_dir = /releases/SGStudio
+```
+
+配置 `remote_dir` 后，整批打包成功会自动上传。Windows 入口通过 `python` 上传
+`windows_x86_64` 下的 ZIP，Linux 入口通过 `python3` 上传 `linux_x86_64`
+和 `linux_aarch64` 下的 tar.gz。FTP 父目录下保留架构、品牌、语言三级目录。
+普通 FTP 的 STOR 命令覆盖远端同路径文件。账号需要有目录创建和文件写入权限。
+`remote_dir` 留空时只打包。`--list` 和 `--dry-run` 只打印信息。
+
+上传失败会返回非零退出码。可用 `scripts\build_all.bat --upload-only` 或
+`bash scripts/build_all.sh --upload-only` 重传已有的包。
+
 ## 3. `build.sh`：250 Linux 三目标
 
 用法：
@@ -118,9 +139,9 @@ bash scripts/build.sh raspberry-pi standard cn SGStudio --watermark off
 
 | target | build tree | package directory |
 | :--- | :--- | :--- |
-| `ubuntu-aarch64` | `build/build_rk3588_<packet>_<language>` | `build/linux_ubuntu_aarch64/<packet>/<language>` |
-| `ubuntu-x86_64` | `build/build_gcc_<packet>_<language>` | `build/linux_ubuntu_x86_64/<packet>/<language>` |
-| `raspberry-pi` | `build/build_aarch64_<packet>_<language>` | `build/linux_raspberry_pi_cross_aarch64/<packet>/<language>` |
+| `ubuntu-aarch64` | `build/build_rk3588_<packet>_<language>` | `build/linux_aarch64/<packet>/<language>` |
+| `ubuntu-x86_64` | `build/build_gcc_<packet>_<language>` | `build/linux_x86_64/<packet>/<language>` |
+| `raspberry-pi` | `build/build_aarch64_<packet>_<language>` | `build/linux_aarch64/<packet>/<language>` |
 
 ## 4. `build_pi.sh`：108 原生防火墙
 
@@ -161,7 +182,7 @@ bash scripts/build_pi.sh aarch64 standard cn SGStudio --watermark off
 
 ```text
 build/build_pi_native_<packet>_<language>/
-build/linux_pi_native_aarch64/<packet>/<language>/<archive_name>.tar.gz
+build/linux_aarch64/<packet>/<language>/<archive_name>.tar.gz
 ```
 
 在 108 的 `htra` Wayland 桌面终端直接启动：
@@ -236,7 +257,7 @@ online=...
 
 启用包内 SCPI 后，在解压包根目录执行 `python scripts/test_scpi_gui_baseline.py --basic-only`；Linux/树莓派使用 `python3`。本机已有 Python 3.12.13，其他机器须准备可用 Python，仅依赖标准库，无需开发目录或 .venv。完整使用说明随包附带；本轮仅静态核对，未运行构建/打包/设备测试。
 
-在 x86_64 构建机执行 `bash scripts/build.sh raspberry-pi standard cn SGStudio --watermark on`，输出 `build/linux_raspberry_pi_cross_aarch64/standard/cn/SGStudio.tar.gz`。树莓派解压、启动程序并连接设备后，可用 `python3 scripts/test_scpi_gui_baseline.py --basic-only --scenario files` 只测文件/流，或 `--scenario rms` 只测 G6～G9。M-2 使用 `assets/WLAN_30MHz.wav`、30 MS/s，单次加载等待 2 s 后截图；测试套件路径、截图/报告和 A/B 临时文件位置与 Windows 一致。
+在 x86_64 构建机执行 `bash scripts/build.sh raspberry-pi standard cn SGStudio --watermark on`，输出 `build/linux_aarch64/standard/cn/SGStudio.tar.gz`。树莓派解压、启动程序并连接设备后，可用 `python3 scripts/test_scpi_gui_baseline.py --basic-only --scenario files` 只测文件/流，或 `--scenario rms` 只测 G6～G9。M-2 使用 `assets/WLAN_30MHz.wav`、30 MS/s，单次加载等待 2 s 后截图；测试套件路径、截图/报告和 A/B 临时文件位置与 Windows 一致。
 
 ## 7. 缓存边界
 

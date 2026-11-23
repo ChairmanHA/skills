@@ -37,13 +37,13 @@ Get-Content -Encoding UTF8 -LiteralPath "$kb\listmode_scpi调试指南.md" | Sel
 
 - [入口：TX 请求、执行与回写](tx_execution_context_phase1_and_provider_migration.md)：TxSessionService / TxPipelineRuntime / executor / latest-intent；Single 显式执行与配置去重边界。
 - [RF / Mod 业务概览](leader_rf_mod_business_overview.md)：公共设置、载波、基带、触发。
-- [GUI Save Load 与 SAStudio 功能回归](gui_save_load_sastudio_test_plan.md)：默认按 Markdown 编号人工引导，--case/--list、32 项初始化/连续动作、结论后用例命名截图与独立结果；G6/K1 时序块、G12 人工键盘、M1 未连接前提、M2 文档/JSON 速率差异；保留显式批量与历史记录，引导已用户实测，结论截图增量待实测。
+- [SCPI 半自动功能验收](sgstudio_semiautomatic_acceptance_tests.md)涵盖当前分支 84 项/454 步、R/S/T 损伤参数自动化、T3 偏置端点和 T4 旧配置夹紧。JSON 生成 Markdown，文档保留旧版实机回读记录。
 - [单通道 H2 信号流 Home 设计依据](h2_single_channel_signal_flow_home_rationale.md)：仅依据当前 h2_api.h；USG 风格基带/调制/射频分工与状态证据边界，尚未实施。
 - [UI 无关运行时与迁移史](ui_independent_runtime_and_minibar_design.md)：CoreRuntimeServices / DeviceRuntimeBridge；旧 in-process 部分为历史。
 - [Provider ownership](analog_htra_provider_lifecycle_and_duplicate_panel_guard.md)：Analog / HTRA 调制归属与已删除的重复 panel 防护。
 - [Streaming 数据流](streaming_dataflow.md)：legacy 双线程、队列、中断与重启；文件列表整行拖放及按新顺序从头下发，静态核对待运行验收。
 - [Streaming 桥接与双通道方案](streaming_bridge_rearm_reboot_refactor_plan.md)：session / endpoint / rearm / reboot / quiesce。
-- [GNSS 接入](gnss_plugin_integration_summary.md)：菜单、配置、实时状态与 Streaming 禁配；XPPS 失效回退 BUS、Sweep Single 逐脉冲整轮及等待节拍确认。
+- [GNSS 接入](gnss_plugin_integration_summary.md)：菜单、配置、实时状态与 Streaming 禁配；XPPS 始终可选，输出关闭或失锁时保留触发源并显示告警，Sweep Single 逐脉冲整轮及等待节拍确认。
 - [插件加载](plugin_metadata_and_loading_architecture.md)：metadata / JSON 依赖 / PluginManager 顺序。
 - [退出与关机](app_shutdown_exit_flow.md)：shutdown 两阶段、线程释放、死锁。
 
@@ -53,12 +53,12 @@ Get-Content -Encoding UTF8 -LiteralPath "$kb\listmode_scpi调试指南.md" | Sel
 - [设备切换与 UI 配置链](device_open_ui_config_flow.md)：open → UI → orchestrator / runtime；MScan Last State 恢复与能力就绪门控；UID 快照仅用于双 ETH A/B，普通重连按当前 UI（静态实施）。
 - [多设备生命周期](htra_multi_device_stageA_design_and_debug.md)：current / retain-open / fallback / watchdog / A-B 机箱；同 IP 5000/5001 切换限定 UID 保存/恢复，不清理文件。
 - [多实例 USB 占用](multi_instance_usb_ownership_and_startup_gate.md)：InstanceStateRegistry / startup gate；USB fallback 保留当前 UI，不读写 UID 快照。
-- [手工 ETH 连接](manual_eth_connect_temporary_design.md)：临时设计、启动策略、IP:Port、模态连接。
+- [手工 ETH 连接](manual_eth_connect_temporary_design.md)：临时设计、启动策略、IP:Port、模态连接；远端 HLC 风扇 50/40°C（静态实施）。
 - [USB / ETH 断联恢复分析](eth设备和usb设备断联恢复的异同点分析.md)：失联判定、注销、coordinator 差异。
-- [H2 API v2.0 参考](htra_h2_api_v2_0_usage.md)：设备能力与 API 调用顺序；13.4 记录 XPPS + Sweep + Single 的 API 确认语义及计数注释边界。
-- [设备设置与 Trigger 拆分](device_settings_panel_and_trigger_split_design.md)：Reference Clock / Trigger In-Out / RF Hardware；Routing 下输出 Hop/Sweep 只读并保留选择。
+- [H2 API v2.0 参考](htra_h2_api_v2_0_usage.md)：设备能力与 API 调用顺序；13.1.1 为随库 2.1.42 clock 静态语义，13.4 为 XPPS + Sweep + Single 的确认语义及计数注释边界。
+- [设备设置与 Trigger 拆分](device_settings_panel_and_trigger_split_design.md)：Reference Clock / Trigger In-Out / RF Hardware；幅度补偿独立成组，位于 Trigger Out 下方；Routing 下输出 Hop/Sweep 只读并保留选择。
 - [参考时钟接入](htra_reference_clock_integration.md)：Profile / FeatureSpec、External 失锁切回 Internal 与实际状态回写。
-- [H2 实时 warning 轮询重构](htra_runtime_warning_polling_design.md)：活动告警集合、外参考500 ms×10次确认后单次切Internal、配置加载/切设备失效及逐次日志；告警码与锁定位独立，禁止推导增删SDK告警；静态实施待构建/设备验收，不新增周期scan/FFM查询。
+- [H2 实时 warning 轮询重构](htra_runtime_warning_polling_design.md)：活动告警集合、外参考500 ms×10次确认后单次切Internal、配置加载/切设备失效；保留逐次确认日志，常态时钟查询仅记录负错误，GNSS 记录锁定转换与查询异常；告警码与锁定位独立。
 - [Capability ID 分档方案](common_capability_id_and_hw_version_strategy.md)：model / hardware_version / 公共语义 ID。
 - [RF Port 能力与绑定](rfport_open_query_and_ui_binding.md)：open 查询、EnumTextButton / property。
 - [型号显示名](device_model_display_name_rules.md)：device_info.xml 条件别名。
@@ -69,14 +69,15 @@ Get-Content -Encoding UTF8 -LiteralPath "$kb\listmode_scpi调试指南.md" | Sel
 ## C-playback
 - [RMS/PEP 配置与跨平台 SIMD 方案](rms_pep_simd_cross_platform_design.md)：默认保持 RMS、启动 RMS=Level、一次性 Level 建立新 RMS；LScan/MScan 功率置灰、FScan 按 baseband 反推；功能静态实现待验收，统计优化待实施。
 - [Level/RMS 异步交互与保存设计](rms_level_async_interaction_design.md)：version 5 功率意图保存/恢复、旧配置/Reset、公开 RMS SCPI；插件声明保持量，Pulse 保持 Level/RMS 只读，其他有界 baseband 默认 RMS；对称显示、RF OFF Mute 与硬件去重；已静态实施，未编译/运行，第 13 节及 G13 为人工验收，下载拆分等后续方向未实施。
-- [Level 参考面端口 IPC 与 API 接入准备](level_reference_plane_port_ipc_and_api_integration.md)：端口协议 2、共享不可变 adapter、POW:OFFS 已静态实施；Main 持有 Offset，Main/helper 状态/请求/回写统一端口值，显示/键盘转换一次；Offset 只刷新 presentation，不推进 Sweep revision。FFM/F/L/MScan API 继续端口面，未构建/运行，含后续验收清单。
-- [信号损伤方案：AWGN 与 I/Q 损伤在前端 IQ 层实现](signal_impairments_p0_interaction_design.md)：2026-11-10 撤销 FPGA 扫描同步方案的原因、固定噪声改用逐步改 SNR + 推导 Level、IQ 处理顺序与适用范围、首版无需新 API、FPGA 就绪后的迁移；3.3 统一 Level Offset 正增益/负线损、目标减 Offset 下发与同参考面回写；2026-11-10 AWGN/IQ 改为 Core 集中处理副本（>125 MiB 不支持）静态实施，未构建/运行。
-- [信号损伤 Impairments 页面入口与交互](signal_impairments_ui_entry_design.md)：CommonPanel Impair 按钮 2026-11-10 恢复显示（五按钮 Wide 阈值 1061 px），AWGN/I/Q 组标题显示处理状态，Minibar 不含损伤 UI/状态/IPC；内部保留 I/Q、AWGN、Freq/Clock 三组布局；User Flatness UI 更名 Amplitude Compensation，RF Hardware 的全局 Level Offset 入口隐藏。4.2 记录共享参考面 adapter、端口 IPC、common.LevelOffset 与端口面 CSV/profile；Freq/Clock 与补偿 API 已静态接入，含 Streaming、非空表 2–999 行、导入超限截断、空表 Apply 关闭补偿及三语 Excel；未构建/运行。
+- [功率设置、幅度补偿与 UCOR](level_reference_plane_port_ipc_and_api_integration.md)：2026-11-17 删除 Level Offset 全部代码和 POW:OFFS；普通 Power、SCPI/Minibar 直接功率、旧字段忽略；常量校正使用补偿表，UCOR 与 UNLEVEL 优先级，静态实施待运行。
+- [信号损伤方案：AWGN 与 I/Q 损伤在前端 IQ 层实现](signal_impairments_p0_interaction_design.md)：2026-11-10 撤销 FPGA 扫描同步方案的原因、固定噪声改用逐步改 SNR + 推导 Level、IQ 处理顺序与适用范围、首版无需新 API、FPGA 就绪后的迁移；3.3 为直接功率设置与幅度补偿，Level Offset 已于 2026-11-17 删除；2026-11-10 AWGN/IQ 改为 Core 集中处理副本（2026-11-18 已支持设备容量内的大波形）静态实施，未构建/运行；2026-11-17 AWGN 只保留 SNR 和 Bandwidth，带宽按 0.8·Fs 双向钳位。
+- [信号损伤 Impairments 页面入口与交互](signal_impairments_ui_entry_design.md)：2026-11-18 入口位于 FancyTabWidget 基带列表末项，使用亮青蓝使能配色，三组全宽纵排。2026-11-20 I/Q Offset 范围收紧为 ±20 %FS，旧配置加载时夹紧，六套翻译目录清理过时提示。未应用和错误固定单行，悬停查看全文。含三组参数、持久化与 Minibar 边界、Amplitude Compensation / UCOR、Level Offset 删除与 2–999 行表格。静态实施，待运行验收。
+- [AWGN 与 IQ 损伤审查和测试方案](awgn_iq_impairments_review_and_test_plan.md)：基线 eb0c2233；逐记录带内 SNR 定标、偶数多音翻转中心、RMS/Level 保持边界；数值核对、真机操作、频谱/相干 IQ 判据与错误恢复，Save IQ 不含损伤；静态审查，测试未执行。[4 GB 树莓派大波形 AWGN 效率设计](awgn_large_waveform_memory_performance_design.md)：1000 MiB/320 MHz，文件与 SDK 共用只读原始 IQ + 独立带噪结果，分块 DSP 和 Save IQ 内存预算。Core 双缓冲已实施，树莓派峰值和耗时待测。
 - [Frequency / Sample Rate Error 人工验收](frequency_samplerate_error_test_plan.md)：CW ±Hz、对称三音中点/间距与 ±1000/临时 ±100000 ppm、Streaming 同采样率 WAV、四类载波×三类基带、旁路恢复/驻留重配与数值判据，含偶数多音 LO 补偿专项；方案未执行。
 - [Center/Level 配置链路重构设计](CenterLevel配置链路重构设计.md)：固定 Playback 的 FFM-only 当前实现；CW、Mute 与 LScan/FScan 的后续优化方向。
 - [入口：波形参数约束](Waveform_Parameters_Constraints.md)：默认值、采样率、IQ 带宽、UI 联动；含 AWGN 单遍/分块 FIR 优化、实测耗时及频谱/RMS验收。
 - [多型号 Playback 能力迁移](htra_multi_model_playback_capability_refactor.md)：能力域、revision、immutable payload、分阶段进度。
-- [设备能力参数策略](playback_waveform_parameter_capability_policy.md)：OPTION_BW_320M_TX、400 MSPS 与参数决策目标。
+- [设备能力参数策略](playback_waveform_parameter_capability_policy.md)：OPTION_BW_320M_TX、400 MSPS；无设备共享320M/1000 MiB离线生成规格，启动配置恢复与真实能力切换（静态实施）。
 - [产品参数决策矩阵](playback_parameter_product_decision_matrix.md)：无/有选件对比、待实现与待确认项。
 - [ARB 模式入口](arb_mode_summary.md)：Ordinary / IQS / ProgrammedArb 解析与 runtime 边界。
 - [OrdinaryWav 截取与周期](arb_ordinary_wav_slice_period_semantics.md)：sampleOffset / samplesToUse / period；Quick Waveform 业务统一裁剪、动态范围与无文件零周期。
@@ -91,6 +92,8 @@ Get-Content -Encoding UTF8 -LiteralPath "$kb\listmode_scpi调试指南.md" | Sel
 - [Arb 编辑需求与最小分段表设计](arb_editor_requirements_and_segment_table_design.md)：模板/快速库入口与 A/B/C/D/E 单路任务、Hold/Ramp/Data、按任务划分重采样边界及线性边沿语义；[交互简版](arb_editor_minimum_model_and_user_interaction.md)：保留原 A/B/D/E/F 编号的五类操作说明；均为尚未实施方案。
 - [TrueArb 硬件契约与七类波形算法](awg_truearb_waveform_algorithms_and_arb_editing.md)：C0 设备契约与算法；Amplitude、DC Offset、HighZ/50 Ω/Custom 负载含义及 CSV 导出恢复、预期播放电压；含 Pulse 参数联动与 DC 参数收敛（已实现、静态核对）、Noise 参数与算法调研（维持现状）、B0 对比与厂商调研。
 - [Digital 交互入口](digital_modulation_user_interaction_flow.md)：SPS、异步生成、截断、Instrument 截断选项触控尺寸与 SVG 留白、reset；2026-11-11 Save IQ 确认/选路径/预检后释放缓存、后台完整导出与真实写盘进度（静态实施，待运行验收）。
+- [从反汇编重写 DSSS 与 OFDM 基带生成算法](dsss_ofdm_waveform_algorithms.md)：由 ELF 指令推导 PN 位序、RRC 成形、基 2 IFFT、窗口交叠及 IQ16 量化，逐段对应 C++17 重写与中间对照值。
+- [H2 Digital/DSSS/OFDM 临时版迁移](h2_digital_dsss_ofdm_temporary_migration.md)：Windows x64 / 125 MS/s、设备授权替代 FixedLic、MSK 字段联动、长度拒绝与完整 Save IQ、会话及 IQ 所有权（方案，未实施）。
 - [Multitone 算法入口](htra_multitone_current_algorithm_and_vsg60_boundaries.md)：tone / notch / phase / AutoScale / 精确周期约简 / preview；中心音遮盖固定为内部 true 常量，不对外开放、不存 JSON，Preset/旧 false 文件不能关闭（静态实施，待验收）；Fixed 与 Playback F/L/MScan 的 LO 频率补偿（下发加偏移、回写减偏移，切换 CW/奇数音不残留）；Main/Minibar Count 2..1024 与一致的表格处理规则，两端 1024 音改单音已用户实测通过。
 - [Multitone 与 VSG60 对比](multitone_vsg60_three_case_comparison_and_playback_consistency.md)：三组样本与 Playback 一致性。
 - [iqtone.m 借鉴候选](htra_multitone_iqtone_reuse_candidates.md)：历史参考、后续优化建议。
@@ -106,6 +109,7 @@ Get-Content -Encoding UTF8 -LiteralPath "$kb\listmode_scpi调试指南.md" | Sel
 ## E-scpi
 
 - [入口：SCPI 接入审阅与方案](scpi_review_and_integration_plan.md)：TX/UI 回写、错误语义、ScpiIntentService 迁移；LOAD/SAVE、images 截图、JSON 相对资源路径与 RMS/basic-only；幅度补偿 CORR **9 类功能、13 入口使用说明**：长短写、参数/响应、dB、草稿提交、逻辑名称、VAL?、ASCII/REAL64 示例与错误码。旧版测试 7/7 组通过，当前精简为 3 组；GUI/Reset/扫描/射频待验收。
+- [信号损伤 SCPI 接口设计](signal_impairments_scpi_design.md)涵盖已接入的 `IQ:AWGN`、I/Q、Freq/Clock 12 对设置与查询、单位校验、带宽请求和 T4 配置回归。设备验收待执行。
 - [ListMode 命令调试入口](listmode_scpi调试指南.md)：TCP 5025、命令表、驻留判据、STEP/Hop 与 RESET 边界；1 GHz/500 MHz span、历史 R&S 实测流程。
 - [ListMode 接口设计](listmode接口实现.md)：含 GUI MScan 与 SCPI 共用的 Draft/Submitted/Applied、数据 Apply 与设备执行分离、Last State 恢复后的 Apply 状态同步、Enabled 按钮门控、真实执行与兼容映射边界。
 - [R&S List Mode 参考](rs_list_mode_scpi_reference.md)：R&S 的 listmode scpi命令、触发、索引、学习与文件容器。
@@ -129,7 +133,7 @@ Get-Content -Encoding UTF8 -LiteralPath "$kb\listmode_scpi调试指南.md" | Sel
 - [QSS 入口](QSS_Best_Practices.md)：样式编写与工程约定。
 - [LabelButton 状态样式](labelbutton_style_state_workflow.md)：InfoButton、刷新链、RF / Settings / Sweep。
 - [双行按钮空间限制](labelbutton_dual_row_vertical_space_limit.md)：padding / labelMargins；[5 寸字号与物理换算](<5 寸 1024×600 的物理换算（“模拟”基线）.md>)：instrument 24px / 64px 参数按钮与真机验收边界。
-- [Level 状态 badge](commonpanel_level_unlevel_badge_ui.md)：CommonPanel 局部标记；补偿启用显示 AMPC，Offset 非零显示 OFST，可组合；UNLEVEL 优先并独占 badge，告警消除后恢复普通状态，静态实施待运行验收。
+- [Level 状态 badge](commonpanel_level_unlevel_badge_ui.md)：补偿启用显示 UCOR，UNLEVEL 优先并独占 badge；AMPC/OFST 与 Level Offset 已删除，告警解除后恢复 UCOR，静态实施待运行。
 - [Auto Mod 用户意图](auto_mod_user_intent_boundary.md)：FancyTabWidget 用户信号、main / Instrument MOD availability、外部使能请求、返回 Home 对齐与统一当前目标。
 - [调制列表响应式布局](fancytabwidget_modulation_list_responsive_layout.md)：单/双列、宽度与滚动条。
 - [TitleBar 菜单与溢出](titlebar_menubar_outputmode_and_overflow_behavior.md)：central grid 接入、输出模式、工具组、重复触摸。
@@ -141,7 +145,7 @@ Get-Content -Encoding UTF8 -LiteralPath "$kb\listmode_scpi调试指南.md" | Sel
 - [多屏 popup 几何](multiscreen_popup_geometry_and_screen_topology.md)：屏幕断开、DPI、EnumTextButton / ComboBox / QMenu。
 - [Frameless 白边排障](frameless_multimon_dpi_white_border_issue.md)：多屏与高 DPI。
 - [设备状态 UI 反馈](device_status_ui_feedback.md)：error / warning 去重、15–19 失锁滚动文案与状态生命周期、同码 RLO 轮播联动及 Minibar 例外；已移除状态未更新后缀/tooltip，内部确认状态保留。
-- [MessageDialog](messagedialog_design.md)：交互、hosted 层级与提示边界。
+- [MessageDialog](messagedialog_design.md)：交互、hosted 层级与提示边界；正文统一左右 20 px，移除短文本左偏移（静态修改，待树莓派验收）。
 - [NotificationPopup](controls_notification_popup.md)：非模态通知、动画、定位与自动关闭。
 - [Wayland 无边框弹窗](WAYLAND_FRAMELESS_OVERLAY_PATTERN.md)：overlay 与遮罩模式、List Mode 数字键盘与全局外部点击边界。
 - [Wayland 嵌套模态排障](wayland_nested_modal_dialog_issue_record.md)：弹窗消失、输入阻塞与工程决策。

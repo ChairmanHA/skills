@@ -2,9 +2,11 @@
 
 本文档总结当前 HTRA 参考时钟接入到 SGStudio 的现状、设计取舍、完整配置链路、当前前端实现以及剩余约束。
 
+2026-11-13 更新：周期时钟观测在参考源未变时保留已配置频率；仅频率查询值改变不再触发 runtime / UI / 软键盘回写，RefOut 改变仍同步开关。实际切源（含失锁回退 Internal）继续同步查询结果。配置完成和页面显式查询保留完整回写，设备原始观测、告警及锁定位不变。此规则取代下文周期查询同步频率的描述；仅静态核对，未构建/设备验收。见[调查与修复记录](../TaskLog/2026-11-13_reference-clock-polling-input-writeback.md)。
+
 2026-10-30 更新：外参考首次失锁后改为每 500 ms 有界确认，十次仍失锁才单次切 Internal；配置加载挂起、设备切换及新时钟配置使旧轮询/观测失效。原 warning UI 和 1 秒状态刷新不变，新增 `[RefClock]` 逐次日志。该规则取代本文历史的立即恢复及 100 ms 延迟描述；配置后查询仍在既有 writeback 位置。详见[当前确认规则](htra_runtime_warning_polling_design.md#2026-10-30-当前参考时钟确认规则)。仅静态实施，未构建/设备验收。
 
-注：当前实现已经把 `SystemClockOut (RefOut)` 从“UI 改动即触发公共重配”的链路中拆出，改为设备快捷控制；`RefClockSource / RefClockFrequency` 仍保留在公共配置链路中。设备查询回写使用完整参考时钟状态，覆盖 source / frequency / output。
+注：当前实现已经把 `SystemClockOut (RefOut)` 从“UI 改动即触发公共重配”的链路中拆出，改为设备快捷控制；`RefClockSource / RefClockFrequency` 仍保留在公共配置链路中。配置完成和显式查询回写使用完整参考时钟状态，覆盖 source / frequency / output；周期观测遵循上述编辑保护规则。
 
 ## 1. 目标与边界
 
