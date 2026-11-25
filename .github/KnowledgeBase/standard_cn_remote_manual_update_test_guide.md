@@ -110,11 +110,11 @@ scripts/build.sh raspberry-pi standard cn SGStudio --watermark off
 scripts/build_pi.sh standard cn SGStudio --watermark off
 ```
 
-两种方式使用不同的本地产物目录，避免混淆来源：
+两种方式在各自构建机的 checkout 中使用相同的相对路径。按构建机区分交叉包和原生包。
 
 ```text
-250 交叉包：build/linux_raspberry_pi_cross_aarch64/standard/cn/SGStudio.tar.gz
-108 原生包：build/linux_pi_native_aarch64/standard/cn/SGStudio.tar.gz
+250 交叉包：build/linux_aarch64/standard/cn/SGStudio.tar.gz
+108 原生包：build/linux_aarch64/standard/cn/SGStudio.tar.gz
 ```
 
 上传后对应：
@@ -321,8 +321,8 @@ Get-FileHash build/windows_x86_64/standard/cn/SGStudio.zip -Algorithm SHA256
 Linux aarch64：
 
 ```bash
-sha256sum build/linux_pi_native_aarch64/standard/cn/SGStudio.tar.gz
-tar -tzf build/linux_pi_native_aarch64/standard/cn/SGStudio.tar.gz | head
+sha256sum build/linux_aarch64/standard/cn/SGStudio.tar.gz
+tar -tzf build/linux_aarch64/standard/cn/SGStudio.tar.gz | head
 ```
 
 同时人工确认：

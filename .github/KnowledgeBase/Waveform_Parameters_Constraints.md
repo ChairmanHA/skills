@@ -51,6 +51,7 @@ $$
 也就是说：
 
 - Digital、DSSS、OFDM 以及 HTRA AM/FM/PM/Pulse/Multitone/Ramp/AWGN 已改为消费当前设备 Playback domain：未返回 `OPTION_BW_320M_TX` 时使用 `[195.3125 kHz, 125 MHz]`，返回该选件时使用 `[195.3125 kHz, 200 MHz] U {400 MHz}`。model 122、132及其他 HTRA 型号都按选件结果分档。
+- 2026-11-16 起，上述十类生成型业务在无可用设备能力时，共用 `Core::offlinePlaybackCapabilities()` 的 `[195.3125 kHz, 200 MHz] U {400 MHz}` / 1000 MiB 离线规格，覆盖配置恢复、编辑、生成和 Save IQ。真实设备能力到达后按实际能力重新求解；Digital/DSSS/OFDM 仍受现有许可证门控。该修改已静态实施，未构建/运行。
 - 400 Msps 是精确离散点；200~400 Msps 之间不是连续可用区间。已迁移业务在普通参数归一化时优先回写连续低档，只有精确命中 400 Msps 的组合才保留该点。
 - Step Sweep 等尚未迁移的业务仍按 legacy 常量工作，其当前行为不能据此宣称支持带宽选件能力。
 
@@ -115,7 +116,7 @@ $$
 
 ### 5.1 波形大小阈值
 
-已迁移Playback业务的大波形保护阈值来自当前设备`maxWaveformBytes`：未返回`OPTION_BW_320M_TX`时为`125 MiB`，返回该选件时为`1000 MiB`。`Analog::MAXDOWNLOADSIZE`只作为尚未收到可用capability或尚未迁移业务的legacy 125 MiB fallback。
+已连接设备的大波形保护阈值来自真实 capability 的 `maxWaveformBytes`（H2 使用 API 返回的实际内存容量；软件选件档参考值为125/1000 MiB）。上述十类生成型业务在无可用capability时使用共享离线规格的1000 MiB上限，HTRA/Analog 不再按legacy 125 MiB提前回写启动参数。`Analog::MAXDOWNLOADSIZE`仍用于未迁移的legacy路径；ARB文件、Streaming及Digital完整导出继续遵循各自规则。
 
 ### 5.2 大波形处理原则
 

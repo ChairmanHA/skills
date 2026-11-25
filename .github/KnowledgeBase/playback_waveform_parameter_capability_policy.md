@@ -1,6 +1,7 @@
 # Playback 波形参数的设备能力约束策略（按 OPTION_BW_320M_TX 选件分档）
 
 日期：2026-07-20
+更新：2026-11-16（共享离线生成规格；静态实施，未构建/运行）
 
 ## 1. 目的与范围
 
@@ -47,6 +48,14 @@ model 122、132 及其他 HTRA 型号统一使用设备 open 后的 `device_quer
 2. 只有参数组合能够精确形成 400 MSPS，或者连续 200 MSPS 确实无法满足硬质量约束时，才允许使用 400 MSPS。
 3. 设备从含带宽选件档切换到无带宽选件档后，任何 400 MSPS 请求都必须重新解析。
 
+### 2.3 无设备时的离线生成规格
+
+AM/FM/PM/Pulse/Multitone/Ramp/AWGN 及 Digital/DSSS/OFDM 在尚未取得可用设备能力时，统一使用 `Core::offlinePlaybackCapabilities()`：`[195.3125 kS/s, 200 MSPS] U {400 MSPS}`、1000 MiB、每复样本4字节。该规格用于配置恢复、参数编辑、动态选项、生成 plan 和 Save IQ；保留各业务的格点与参数约束，不自动提高普通参数或填满容量。
+
+这使 User/Last State 的合法320M配置能在设备连接前恢复和生成，不再先按125 MSPS基线永久回写。HTRA 与 Analog 的 `effectiveCapabilities()` 共用这份离线规格；取得有效设备能力后原样使用真实 Playback domain 和容量（包括 H2 API 返回的实际内存容量），继续由现有 `applyDeviceCapabilities()` 重新求解及执行设备切换回写规则。
+
+离线规格不修改真实 `CurrentDeviceCapabilitySnapshot`，未就绪时 TX 仍受 capability-ready/usable 门控。Digital/DSSS/OFDM 的现有许可证校验和保存门控保持原样。ARB 文件仍沿用自己的待能力恢复机制；Streaming、ProgrammedArb 和未迁移业务不使用此离线规格。
+
 ## 3. 统一约束流水线
 
 每个 business 应按相同顺序处理参数：
@@ -54,7 +63,7 @@ model 122、132 及其他 HTRA 型号统一使用设备 open 后的 `device_quer
 ```text
 UI/Profile
   -> 设备无关基础合法化
-  -> 根据 当前设备能力 推导可行采样率/点数集合
+  -> 根据当前设备能力（未就绪时使用离线生成规格）推导可行采样率/点数集合
   -> 按该 business 的采样率偏好选择候选
   -> 把时间、带宽、Rb、SPS 等量化结果永久回写
   -> 计算 source layout 与最终补齐 layout
@@ -106,7 +115,7 @@ PropertyMetadata 只保留简单、连续、设备无关的限制，例如：
 - 含带宽选件档：1000 MiB 是硬上限。
 - 对 Digital/DSSS/OFDM/ARB，业务已有明确的长度或文件语义，可以直接以硬上限决定可生成/可加载长度。
 - 对 Pulse 这类“提高 Fs 只会增加时域采样密度”的业务，建议增加 125 MiB 的软预算；只有为了满足窄脉宽、超长周期或用户显式参数才突破软预算，1000 MiB 仍为最后硬门禁。
-- Save IQ 与 Playback 使用相同的 plan 和容量检查；不能允许保存一份设备无法生成或播放的超大波形。
+- 常规 Save IQ 与 Playback 使用相同的 plan 和所选容量检查；无可用设备能力时按第2.3节的离线规格生成和保存。Digital 已有的完整波形导出路径保留其独立于截断播放缓存的长度语义。
 
 ### 3.4 参数归一化与设备切换策略
 

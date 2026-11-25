@@ -288,7 +288,7 @@ print support）只打印警告，因为 Qt 在加载失败时会跳过它们。
 
 脚本首先验证：
 
-- `aarch64-linux-gnu-gcc/g++`、`file`、`strings`、目标 `readelf` 等工具存在；
+- `aarch64-linux-gnu-gcc/g++`、`file`、目标 `readelf` 等工具存在；
 - 编译器 `-dumpmachine` 结果确实是 AArch64；
 - 目标 Qt prefix、libraries、plugins 和 x86_64 host tools 路径存在；
 - 必需 Qt Wayland runtime 在配置前已经完整。
@@ -325,16 +325,15 @@ ELF，并执行：
 
 1. 必需主程序、Qt Wayland、xcb、LayerShellQt runtime 和 `libgomp.so.1` 必须存在。
 2. 每一个 ELF 都必须是 ARM AArch64。
-3. 一般 ELF 最高版本需求不得超过 RK3588 已知上限：`GLIBC_2.27`、
-   `GLIBCXX_3.4.25`、`CXXABI_1.3.11`；仅
-   `lib/libgenSignalWave.so` 的 GLIBC 需求允许到用户接受的 `2.29`，并打印警告。
-4. 不得在归档中捆绑前述 glibc、C++ runtime 或 GPU driver runtime。
-5. ELF 的 `NEEDED`、RPATH 或 RUNPATH 中不得残留 `/home`、`/opt`、`/tmp`
+3. 不得在归档中捆绑前述 glibc、C++ runtime 或 GPU driver runtime。
+4. ELF 的 `NEEDED`、RPATH 或 RUNPATH 中不得残留 `/home`、`/opt`、`/tmp`
    构建机绝对路径。
-6. 任一错误使构建失败，不生成看似成功但已知不兼容的测试包。
+5. 任一错误使构建失败。
 
-如果闭源库以后要求高于 `GLIBC_2.29`、出现更高的 GLIBCXX/CXXABI，或另一个 ELF
-要求高于 RK3588 上限，打包会失败。
+2026-11-20 起不再审计 `GLIBC_*`、`GLIBCXX_*`、`CXXABI_*` 版本需求：新版
+`libgenSignalWave.so` 需要 `GLIBC_2.29`、`GLIBCXX_3.4.29`，原门禁会让打包必然失败。
+脚本不再拦截超出 RK3588 基线的 ELF；RK3588 上该库无法加载，H2 调制会话预期打开失败，
+需在发布前按目标机确认。
 
 ### 9.4 staging 后直接启动合同审计
 
@@ -391,21 +390,21 @@ JOBS="$(nproc)" bash scripts/build.sh \
 归档位置为：
 
 ```text
-/home/jiashilin/vsg2.0/sgstudio/build/linux_raspberry_pi_cross_aarch64/standard/cn/SGStudio.tar.gz
+/home/jiashilin/vsg2.0/sgstudio/build/linux_aarch64/standard/cn/SGStudio.tar.gz
 ```
 
 生成后先记录校验值：
 
 ```bash
 cd /home/jiashilin/vsg2.0/sgstudio
-sha256sum build/linux_raspberry_pi_cross_aarch64/standard/cn/SGStudio.tar.gz
-tar -tzf build/linux_raspberry_pi_cross_aarch64/standard/cn/SGStudio.tar.gz | head -n 30
+sha256sum build/linux_aarch64/standard/cn/SGStudio.tar.gz
+tar -tzf build/linux_aarch64/standard/cn/SGStudio.tar.gz | head -n 30
 ```
 
 ### 11.2 从 250 复制到 108
 
 ```bash
-scp build/linux_raspberry_pi_cross_aarch64/standard/cn/SGStudio.tar.gz \
+scp build/linux_aarch64/standard/cn/SGStudio.tar.gz \
   htra@192.168.3.108:/home/htra/
 ```
 

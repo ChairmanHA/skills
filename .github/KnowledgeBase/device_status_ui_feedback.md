@@ -237,7 +237,7 @@ warning 不走 `MessageDialog`，而是进入状态栏控件 `DeviceInfoWidget` 
 2. 本次 `warnningCode` 属于 LockLoss、且活动集合没有同码时，将其加入本轮受管消息集合。
 3. 受管消息按集合差异加入/移除，不因一次码消费丢失活动项，不重复入队；本轮不再报告的一次失锁提示在下一快照移除。
 4. 普通一次 warning 仅在 `status.warnningCode != 0` 且与 `m_lastWarningCode` 不同时处理。
-5. 普通一次链路只接收 General，且跳过已有同码受管文案；LockLoss 已在第 2 步处理，不再重复加入永久循环队列。
+5. 普通一次链路只接收 General，同码且文案相同的活动项负责显示。LockLoss 已在第 2 步处理。
 6. 最终均通过 `DeviceInfoWidget::addWarnningMessage()` / `removeWarnningMessage()` 操作原队列。
 
 若本次 `warnningCode == 0`，则 `m_lastWarningCode` 被重置为 0。
@@ -333,6 +333,8 @@ External查询返回warning 15时，先通过原码/活动集合显示原失锁�
 - `STATUS_WARNING_BUSTIMEOUT`
 - `STATUS_WARNING_TXLEVEL_FILEDEFAULT`
 - `STATUS_WARNING_IQCAL_FILEDEFAULT`
+
+Streaming 的 `tx_send_stream()` 返回 `+10` 时，状态栏显示带 Streaming 前缀的活动告警。它表示本次流发生过发送超时，后续发送成功或在线重配都保留该记录。发送线程确认停流后，下一份设备状态快照移除该条目。相同的 `+10` 也可能来自其他设备操作，各自的文案允许独立显示和清除。[实现与验证](../TaskLog/2026-11-25_streaming-timeout-warning-lifetime.md)
 
 失锁 15–19 属于 `WarningCategory::LockLoss`，从本次码/活动集合进入随快照移除的滚动队列，并随当前轮播项驱动同码 `RLOxx` 小指示。
 

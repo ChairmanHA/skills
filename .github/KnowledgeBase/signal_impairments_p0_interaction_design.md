@@ -6,9 +6,11 @@
 
 2026-11-05 交互修订：删除总开关；CommonPanel Impair 为三组 State 的聚合 ON/OFF 与导航入口，Minibar 只读显示该聚合状态。Invert 在 I/Q 关闭时保留 ON 值但取消生效强调，I/Q Offset 显示 %FS；Freq/Clock 两项适用性分别判断。本轮按用户要求未编译、运行或测试。
 
-2026-11-10 方向修订：**AWGN、Invert、I/Q 幅度/相位失衡、I/Q Offset 全部在前端 IQ 层实现，FPGA/API 就绪后再评估迁移。** 撤销 2026-10-20 版“FPGA 噪声源 + 扫描同步补偿”主线，原因见第二节。前端 IQ 链路的算法与接入点沿用 2026-10-10 版设计（skills 仓库 git `ebfeeb2`，第一、二层），本文不重复算法细节。已有 API 的项目（Level Offset、Amplitude Compensation、Frequency Error、Sample Rate Error、LO 模式）继续走 API，不受影响。
+2026-11-10 方向修订：**AWGN、Invert、I/Q 幅度/相位失衡、I/Q Offset 全部在前端 IQ 层实现，FPGA/API 就绪后再评估迁移。** 撤销 2026-10-20 版“FPGA 噪声源 + 扫描同步补偿”主线，原因见第二节。前端 IQ 链路的算法与接入点沿用 2026-10-10 版设计（skills 仓库 git `ebfeeb2`，第一、二层），本文不重复算法细节。已有 API 的项目（Amplitude Compensation、Frequency Error、Sample Rate Error、LO 模式）继续走 API，不受影响。2026-11-17 起删除独立 Level Offset，常量校正通过补偿表实现，见 3.3。
 
-2026-11-10 实施（静态，未构建/运行，[TaskLog](../TaskLog/2026-11-10_awgn-iq-frontend-processing.md)）：按用户选择改为 **Core 集中处理**，而不是 3.1 所述的各来源 finalize 原地处理。业务照常发布 payload；`TxSessionService` 组 Playback 请求时交给 `SignalImpairmentProcessor`，在 Core 后台线程调用 `Utils::applyIqImpairments()` 生成带损伤副本，替换下发 payload 与功率指标。处理顺序、SNR 口径、统一缩放和 %FS Offset 与 3.1 一致；整个 payload 作为一条循环记录，噪声用循环 FFT 卷积，首尾无接缝，固定 seed 可复现。功率指标的峰值/PAPR 用最终样点，RMS offset 用缩放后的信号分量，Level/RMS 仍表示信号本身。处理中或失败时 provider 报告未就绪，不输出干净波形。代价：源与副本同时驻留；>125 MiB 波形与大波形独占租约冲突，直接报错。纯 AWGN 业务（`supportsIqImpairments()=false`）、CW、Streaming、ProgrammedArb 不处理，组标题显示 Not applied。参数非法（带宽 > Fs、过窄、零信号、Offset 无余量）时组标题显示错误。
+2026-11-10 实施（静态，未构建/运行，[TaskLog](../TaskLog/2026-11-10_awgn-iq-frontend-processing.md)）：按用户选择改为 **Core 集中处理**，而不是 3.1 所述的各来源 finalize 原地处理。业务照常发布 payload；`TxSessionService` 组 Playback 请求时交给 `SignalImpairmentProcessor`，在 Core 后台线程调用 `Utils::applyIqImpairments()` 生成带损伤副本，替换下发 payload 与功率指标。处理顺序、SNR 口径、统一缩放和 %FS Offset 与 3.1 一致；整个 payload 作为一条循环记录，噪声用循环 FFT 卷积，首尾无接缝，固定 seed 可复现。功率指标的峰值/PAPR 用最终样点，RMS offset 用缩放后的信号分量，Level/RMS 仍表示信号本身。处理中或失败时 provider 报告未就绪，不输出干净波形。代价：源与副本同时驻留；2026-11-18 起，>125 MiB 波形可使用独立的[损伤结果租约](awgn_large_waveform_memory_performance_design.md)。纯 AWGN 业务（`supportsIqImpairments()=false`）、CW、Streaming、ProgrammedArb 不处理，组标题显示 Not applied。零信号或 Offset 无余量时，组标题显示错误。
+
+2026-11-17 AWGN 参数定稿（静态实施，[TaskLog](../TaskLog/2026-11-17_awgn-bandwidth-limit-refactor.md)）：只保留 **AWGN SNR**（加噪前信号平均功率 ÷ AWGN Bandwidth 内的平均噪声功率）和 **AWGN Bandwidth**（噪声宽度）两个参数。不提供 System Bandwidth 或噪声带宽比，这与 VSG60 一致，没有采用 SMW200A 的模型。AWGN Bandwidth 的范围随当前 Playback 采样率变化，上限 0.8·Fs，下限 ≈0.00336·Fs（受滤波器 8191 抽头限制）。owner 保存用户请求值，按当前采样率做双向钳位：采样率降低时显示值和键盘上限一起收窄，采样率升高后自动恢复到请求值；配置文件保存请求值。只有 AWGN 组开启且路径可以加噪时才钳位，因此不需要限幅提示或带宽相关的错误。噪声滤波器在整个 ±Bn/2 内平坦，过渡带位于 Bn 外，且不越过 Fs/2。
 
 全文范围是“简单版”：**所有扫描点使用同一组损伤参数**。每点参数不同（情况 1）和损伤随载波频率变化（情况 2）不支持，用 SCPI 逐点控制替代。固定噪声、改变信号电平的测试也用逐步控制实现（见 2.2），不用硬件 LScan。
 
@@ -27,7 +29,7 @@
 | 采样时钟恢复和容限 | 基带、调制解调器 | Sample Rate Error | 单频点 |
 | 相噪容限 | OFDM、高阶 QAM | Phase Noise | 单频点 |
 | 均衡器验证 | OFDM、宽带单载波 | Channel Filter（静态多径） | 单频点 |
-| 线缆和夹具损耗补偿 | 所有测试台 | Level Offset、User Flatness | 所有模式 |
+| 线缆和夹具损耗补偿 | 所有测试台 | Amplitude Compensation（User Flatness） | 所有模式 |
 
 接收机灵敏度测试通常**不加 AWGN**，只降低信号电平，噪底由接收机自身的噪声系数决定，用现有 LScan 就能完成。需要固定噪声的，是第二、四行这类**解调性能测试**。
 
@@ -86,7 +88,7 @@ P_tot = Pn + 10·log10(1 + 10^(SNR/10))     // 合成波形总功率
 Level = P_tot − RMS_combined(dBFS)          // 与现有 level/RMS 换算一致
 ```
 
-Level Offset 按 3.3 先把 Ps、Pn 换到 API 参考面，比例不变。代价是每步要重新生成和下载 IQ，下载期间输出中断；测试本来每步都要等 DUT 同步，影响小。
+Ps、Pn 不再经过独立 Level Offset 换算，幅度补偿由设备 API 执行。代价是每步要重新生成和下载 IQ，下载期间输出中断；测试本来每步都要等 DUT 同步，影响小。
 
 ### 2.3 IQ 层实现的已知限制
 
@@ -105,7 +107,6 @@ Level Offset 按 3.3 先把 Ps、Pn 换到 API 参考面，比例不变。代价
 
 | 功能 | 实现位置 | 当前状态 | 说明 |
 | --- | --- | --- | --- |
-| Level Offset | 前端换算，经 API 下发 | 已具备电平配置 API，Offset 换算待接入 | Offset 表示外部路径有符号增益；FFM/LScan/MScan 请求为用户目标减有效 Offset，查询回写同加。统一定义见 3.3 |
 | User Flatness（Amplitude Compensation） | API `channel_config_amplitude_compensation` | 已接入（2026-11-05，静态） | 按 RF 频点线性插值，表外按相邻两点线性外推，叠加在工厂校准之上，支持 FScan/MScan；IQ 里的噪声与信号经过同一模拟链，按同一参考面补偿。前端只下发已提交表与开关，经 `TxCommonSettings.userFlatness` 在通用设备设置中、FFM/扫描配置之前下发 |
 | Frequency Error | API：下发 `fc + Δf` 给 FFM/LScan | 已静态接入（2026-11-06） | 使用 Hz，不使用 `tx_stream.fc_offset` 数字搬移；载波真正移动后，镜像和噪声中心都以偏移后的载波为中心。Fixed/LScan 生效，FScan/MScan 旁路，名义频率回写减去同一误差 |
 | Sample Rate Error | API：`realtime_srate` / `playback_srate` 下发 `Fs·(1+ε)` | 已静态接入（2026-11-06） | 分辨率约 0.1 Hz，下次启动输出时生效；400 MHz 孤立点以后会改为连续区间 |
@@ -123,7 +124,7 @@ Level Offset 按 3.3 先把 Ps、Pn 换到 API 参考面，比例不变。代价
         → ① Invert → ② I/Q 幅度/相位失衡 →（Phase Noise，后续）→（Channel Filter，P2）
         → ③ 带限 AWGN 定标与叠加 → ④ 统一缩放，为 Offset 预留余量
         → ⑤ I/Q Offset → ⑥ 最终 int16 量化 → 重算功率指标 → 发布 payload
-API/RF：fc + Δf、Level − Oeff、Amplitude Compensation、Fs·(1+ε)、扫描调度
+API/RF：fc + Δf、Level 设置、Amplitude Compensation、Fs·(1+ε)、扫描调度
 ```
 
 - Invert 在最前面，后续参数都在 RF 坐标系下定义：正频偏向上，Q Offset 的符号与输出一致。
@@ -142,36 +143,11 @@ API/RF：fc + Δf、Level − Oeff、Amplitude Compensation、Fs·(1+ε)、扫�
 | 2 | 损伤随载波频率变化 | 不支持 | 同上；首版频率误差只做 Hz，不提供 ppm |
 | 3 | 扫描中保持噪底固定 | 不支持在一次硬件扫描内实现 | 逐步控制：改 SNR + 推导 Level（2.2） |
 
-### 3.3 Level Offset 参考面与正负号（统一定义）
+### 3.3 功率设置与幅度补偿
 
-2026-11-05 接入准备：下列公式用于说明用户面与端口面关系，不表示要在设备 API 前再换算一次。具体储存、Minibar 端口 IPC、共享显示/键盘适配和 API 回写边界统一见 [Level 参考面端口 IPC 与 API 接入准备](level_reference_plane_port_ipc_and_api_integration.md)。该 IPC 重构已静态实施，尚未构建/运行；本节 Noise 相关公式属于损伤提案，不代表当前已有 API 接入。
+2026-11-17 起删除全局 Level Offset，不再维护用户面与端口面之间的固定加减。Main、Minibar、SCPI、扫描表和设备请求使用相同功率设置口径，波形 RMS/Level 换算不变。
 
-**定义：Level Offset 是外部路径的有符号增益 O，正值为外接放大器增益，负值为线缆/夹具损耗，不是“源输出额外增加 O dB”的功率扰动。** 旧稿同时使用“显示值 = API 电平 + Offset”和“下发 level + Offset”，混用了两种含义；本次保留有符号路径增益定义，纠正下发方向。
-
-若另行定义“补偿量 C”，则 `C=-O`，`API 请求 = 用户目标 + C` 同样正确；线损 3 dB 对应 O=-3 dB、C=+3 dB。冲突不在加减法本身，而在旧稿把路径增益和反向补偿量都叫 Offset。UI、SCPI 与 API 换算统一只使用前一种 O 定义。
-
-先以 Flatness 关闭、无附加噪声的 CW 为例：`DUT 功率 = RF 端口功率 + O`，所以要得到某个 DUT 目标功率，源端必须输出 `目标 - O`。Keysight ESG/PSG 的官方说明同样以外接放大器 +10 dB 为正 Offset，并给出“输出幅度 = 幅度设定 − Offset”的关系。[官方 Amplitude Offset 定义](https://helpfiles.keysight.com/csg/n5110b/esg_psg_signal_generator.htm)
-
-| 外部路径 | 用户 Offset | 用户目标（CW） | API 电平请求 |
-| --- | --- | --- | --- |
-| 无增益/损耗 | 0 dB | -20 dBm | -20 dBm |
-| 线损 3 dB | -3 dB | -20 dBm | -17 dBm |
-| 外接增益 10 dB | +10 dB | -20 dBm | -30 dBm |
-
-Level Offset 位于 Settings → RF Hardware，不由损伤组开关控制（见 [UI 设计第四节](signal_impairments_ui_entry_design.md#四level-offset-与-user-flatnesssettings--rf-hardware)），因此 `Oeff=O`；O=0 即无偏移。所有功率入口与回写只在统一边界换算一次：
-
-```text
-Level_api[i] = Level_user[i] - Oeff       // 固定电平、LScan 起止、MScan 各点
-Noise_api    = Noise_user - Oeff          // 噪声参考（后续，前端推导 Level 时使用）：dBm 或 dBm/Hz
-Power_user   = Power_api + Oeff           // 绝对功率查询/派生显示回到用户参考面
-C/N_user     = C/N_api                    // 信号和噪声同移，比例不变
-```
-
-- `Level_user`、CommonPanel 的 Level/RMS、扫描编辑表及 Noise Power 都属于同一用户参考面。此处只变换参考面，不把既有 Level 的满幅参考定义改成信号 RMS，也不把信号功率改成加噪后的总功率。
-- 以上公式中的 API 电平是 API 的逻辑参考电平，不是额外增加一个“实测端口功率”读数；工厂校准、User Flatness 与硬件增益规划仍由 API 负责。前端不再次把 Flatness 表值加到 level 或 noise_power，避免重复补偿。
-- **O 改变时保持 RF 端口输出不变，只改变显示值**，与 Keysight Amplitude Offset 行为一致：API 电平请求不变，Level/RMS、LScan 起止、MScan 各点和 Noise Power 的显示同时平移 O。之后用户新输入的目标才按 `目标 − O` 换算。存储以 API 电平为准，显示由 `API + O` 派生，避免重复换算；回写不得覆盖仍在编辑的 MScan/Flatness 草稿。这样录入线损时端口功率不会突变，避免损坏后级放大器或 DUT。
-- 例如信号目标 -20 dBm、噪声目标 -40 dBm，O=-3 dB 时，两者请求为 -17/-37 dBm，C/N 仍为 20 dB。该例以 CW 信号及匹配的噪声积分带宽说明参考面换算。
-- User Flatness 同样位于 Settings，不由损伤组开关控制；工厂校准始终保持。
+路径校正只通过 Amplitude Compensation 表与原设备 API 执行，两个不同频点设置相同补偿量即可表达常量校正。前端不把表值重复叠加到 Level、RMS 或噪声功率。开启补偿显示 UCOR，UNLEVEL 优先。完整边界见 [功率设置与补偿](level_reference_plane_port_ipc_and_api_integration.md)。
 
 ## 四、简单版的范围
 
@@ -189,7 +165,7 @@ IQ 损伤只改变下载的波形，下载和启动走现有 `tx_download_wavefo
 
 | 接口 | 用途 | 需确认的点 |
 | --- | --- | --- |
-| `tx_config_ffm` / `tx_config_lscan` / `tx_config_mscan` | `Level_user − Oeff`、Frequency Error 换算后下发 | 无新增 |
+| `tx_config_ffm` / `tx_config_lscan` / `tx_config_mscan` | 原 Level 设置、Frequency Error 换算后下发 | 无新增 |
 | `channel_config_amplitude_compensation` | Amplitude Compensation | 正负号与生效时机（已在 UI 设计中列为待确认） |
 | `tx_stream.realtime_srate` / `playback_srate` | Sample Rate Error | 已确认分辨率和生效时机 |
 | `channel_config_lo_mode` | LO 模式 | 无 |
@@ -211,7 +187,7 @@ IQ 损伤只改变下载的波形，下载和启动走现有 `tx_download_wavefo
 - **功率指标：** 加损伤后按最终样点重算 RMS/PEP，不保留加噪前的指标。同时记录加噪前的信号 RMS，保证 Level 换算仍以信号功率为准（开 AWGN 前后信号功率不变，总功率增加）。
 - **Apply：** 修改 AWGN/I/Q 参数后，从原始生成参数或文件重新物化 IQ，不在上次已损伤的结果上继续叠加；重新下载并按现有流程重启输出。
 - **适用性：** 当前路径不支持 IQ 损伤（CW、Streaming、未接入的来源）时，组开关可保留但明确显示未生效，不暗中替换为常数 IQ Playback。
-- **换算：** Level Offset 定义见 3.3；Frequency Error 用 `fc + Δf`；Sample Rate Error 用 `Fs·(1+ε)`，`m_sampleRate` 保持名义值。损伤只由所属组开关控制，再分别判断业务适用性。
+- **换算：** 功率设置与补偿见 3.3；Frequency Error 用 `fc + Δf`；Sample Rate Error 用 `Fs·(1+ε)`，`m_sampleRate` 保持名义值。损伤只由所属组开关控制，再分别判断业务适用性。
 - **持久化、连接后恢复、SCPI：** 共用 `SignalImpairmentsSettings` owner 和校验规则；Minibar 不展示或编辑损伤；损伤 SCPI 后续补充，并给出情况 1、2、3 的逐步控制示例。
 - **噪声参考（后续）：** 前端输入 Pn 和 Ps（或 Pn 和 SNR），按 2.2 推导 SNR 与 Level 并显示派生的总功率，不需要新 API。
 
@@ -234,9 +210,8 @@ IQ 损伤只改变下载的波形，下载和启动走现有 `tx_download_wavefo
 | I/Q Offset | 直流分量符合 %FS 设定，不被 AutoScale 消掉 |
 | 所有 IQ 损伤关闭 | 输出与未接入损伤前逐样点相同 |
 | CW、Streaming、未接入来源 | 显示未生效，不改变输出 |
-| CW 目标 −20 dBm，Level Offset=−3/+10 dB | 请求分别为 −17/−30 dBm；查询回写恢复用户参考面，目标值不被重复换算 |
-| 输出中把 Level Offset 从 0 改为 −10 dB | RF 端口功率不变，Level/RMS/扫描点显示下移 10 dB，出现 OFST 标记 |
-| 分组 OFF 后再 ON | 保留该组参数；其余组及 Level Offset、Flatness、工厂校准不变 |
+| 开启幅度补偿 | Level 显示 UCOR；UNLEVEL 出现时只显示告警，告警解除后按当前开关恢复 UCOR |
+| 分组 OFF 后再 ON | 保留该组参数；其余组及 Amplitude Compensation、工厂校准不变 |
 | 只开 AWGN / 只开 I/Q / 同时开启 | 三个组 SwitchButton 独立，不清除被旁路组的参数 |
 | 设备重连、preset | 前端恢复已保存的设置，UI 与实际输出一致 |
 

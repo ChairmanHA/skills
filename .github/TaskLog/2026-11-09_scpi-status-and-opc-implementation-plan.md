@@ -2,7 +2,7 @@
 
 - 日期：2026-11-09
 - 来源：[测试机制分析 §10](2026-11-09_test-automation-analysis.md)；[2026-09-08 OPC/WAI 评审草案](2026-09-08_scpi-operation-completion-design.md)；[2026-09-17 移除 SCPI worker](2026-09-17_remove-scpi-worker-and-batch-dialog-log.md)；KB [SCPI 接入审阅](../KnowledgeBase/scpi_review_and_integration_plan.md) §2/§3。
-- 状态：**方案，未实施**。本文件为 static 分析，各阶段的验证级别分别注明。
+- 状态：2026-11-24 已实现 Core 待执行原因及三个协议同步命令，`*ESR?` 可读取完成事件。静态复核见 §5、§6。Streaming 已补齐桥接完成状态与失败转发，详见 §8。其他 Core TX 失败转发、ProgrammedArb 桥接和设备验收仍待完成。
 
 ## 0. 已确认决策与默认假设
 
@@ -206,6 +206,18 @@ P8 运维类改进（独立，可选）
 
 **成功判据**：审计表没有遗留未处理的 queued 跳转；验证矩阵中没有“原因提前归零”或“长期不归零”。
 
+### P2 实施记录（2026-11-24）
+
+| 执行路径 | 当前判定依据 |
+| --- | --- |
+| CW、F/L/MScan、Single、通用配置 | 刷新请求同步置位，贯穿快照构建，再交给在途或排队的 apply。单独提交或编辑 MScan 表不代表设备正在执行。 |
+| 配置恢复、设备切换 | 使用批处理暂停、切换进度和能力就绪通知。切换覆盖临时无设备的窗口。 |
+| AM、FM、PM、Pulse、Ramp、AWGN、Multitone、Digital、DSSS、OFDM | 读取当前生成请求的 Preparing / Ready / Failed 状态，初始 Idle。错误文案和数据是否就绪分别保留。 |
+| Quick Waveform、普通 ARB、IQ 损伤处理 | 使用文件读取或已排队的准备任务、损伤计算及载荷重新生成状态。 |
+| Streaming、ProgrammedArb | 只覆盖 Core 等待旧 apply 结束并交接的阶段。业务接手后的 I/O 终态待接入。 |
+
+当前接口只发布待执行原因。原设计中的统一失败事件和设备时序矩阵仍待完成。详见 [Core 实施记录](2026-11-24_core-tx-operation-state.md)。
+
 ## 6. P3：真实 `*OPC?`/`*WAI`/`*OPC`
 
 **改动（协议层 `parser.cpp/.h`）**
@@ -247,6 +259,8 @@ P8 运维类改进（独立，可选）
 | `*RST` 后短暂断连，设备暂时不可用，`*OPC?` 被 D2 提前放行 | 确认 preset 的断连窗口是否落在 `DeviceSwitch`/`CapabilityReconcile` 内；如果不在，由设备 reset 的所有者在窗口内保持 pending。在矩阵中专门验证 |
 | 客户端超时短，长时间生成时超时 | 发布说明；推荐用 `*OPC` + 轮询 `*ESR?` 处理长操作 |
 
+**2026-11-24 实施记录**　`*OPC?`、`*WAI`、`*OPC` 和 `*ESR?` 已接入。修订后不再按上文第 1、2 条切分消息，也不修改 libscpi：`*WAI` / `*OPC?` 只能位于程序消息末尾或独占一条消息，中途出现报 -100；等待在整行 `SCPI_Parse` 返回后执行。`*OPC?` 返回 NR1 `1`。上文 `FREQ?;*OPC?;POW?`、2500 个 `*OPC?` 和 `MTON:COUN 1024;*WAI;MTON:COUN?` 等验证用例须改为分条消息。Core 首次空闲时登记完成位并调度恢复。OPER / QUES 状态映射、SRQ 和异步失败转发另行实施。验证级别为 static。[本次实施记录](2026-11-24_scpi-operation-barriers.md)
+
 ## 7. P4：异步失败进入错误队列
 
 **改动（`src/plugins/scpi`）**：服务运行期间，把 `operationFailed(kind, message)` 转成 `pushError`。
@@ -278,6 +292,8 @@ ESR 由 libscpi 自动置位。来源不区分（D3）。
 4. 采样率确认提示（M6）：确认 SCPI 路径是否会弹模态框。如果会，`*OPC?` 将等待人工操作，需要为 SCPI 定义非交互策略（另议）。
 
 **验证**：M-1、M-2 加载，启用/停用，改采样率；Streaming 中执行 `*OPC?`；拔线（只拔非流模式的数据口，遵守 M1 的安全警示）。
+
+**2026-11-24 实施记录**　Streaming 已同步登记启动、改参与停止。启动或重配须等首个 IQ 块返回 0，失败进入全局错误队列并置 ESR bit 3，停止须等发送线程确认退出当前设备 I/O。`STAT:OPER:COND?` bit 10 反映 Streaming 运行状态，`SYST:ERR?` 可读详细原因。远程改采样率经现有远程编辑入口执行，无需吞吐确认。ProgrammedArb 桥接与设备验收待处理。[Streaming 实施记录](2026-11-24_streaming-scpi-operation-completion.md)
 
 ## 9. P6：QUES/OPER 设备条件接线
 
@@ -323,3 +339,42 @@ ESR 由 libscpi 自动置位。来源不区分（D3）。
 1. P1～P4 完成后，baseline 的 basic/scans/files/repeat/rms 改用 `*OPC?` 同步、不使用固定等待，在 Windows Debug 和树莓派上各连续通过 10 轮，结果不比固定等待版本差。
 2. 验证矩阵中 `*OPC?` 从未早于 Core 终态返回，也没有出现挂起。
 3. 协议回归与新增 `test_scpi_ieee488.py` 全部通过；§11 列为“不变”的行为逐字节一致。
+
+
+## 1. 应返回数字或助记符、却返回带引号字符串的
+
+`helper.cpp` 里的 `callResult2SCPI` 只按 QVariant 类型选择格式：`bool` 输出 `1`/`0`，int 和 double 输出数字，`QString` 和 `const char*` 一律走 `SCPI_ResultText`，加上双引号。下面这些因此不符合 SCPI 惯例：
+
+| 查询 | 当前回复 | 按规范应为 |
+| --- | --- | --- |
+| `OUTP:STAT?`、`OUTP:MOD:STAT?`、`SWE:STAT?`、`ROSC:OUTP:STAT?`、`TRIG:SEQ:OUTP:STAT?`、`SYST:TEST:*:STAT?`、`ARB/QUICK:ASC?` | `"ON"` / `"OFF"` | 布尔查询返回 `1` / `0` |
+| `LIST:FREQ?`、`LIST:POW?`、`LIST:DWEL:LIST?`、`CORR:CSET:DATA:FREQ?` / `POW?` | `"1e9,2e9"`，空表时为 `""` | 不带引号的数字列表 |
+| `SWE:MODE?`、`ROSC:SOUR?`、`TRIG:SEQ:*?`、`LOO:MOD?`、`RFO:PORT?`、`LIST:MODE?` / `RMOD?` / `TRIG:SOUR?` / `DWEL:MODE?`、`FREQ:MODE?`，以及各调制的 TYPE / FILTer 查询 | `"Internal"`、`"XPps"`、`"FREQ"` 等 | 不带引号的大写短形式助记符，例如 `INT`、`EXT`。现在部分回复是混合大小写，与设置时接受的写法对不上 |
+| `*ERR?` | `"0, No error"` | `0,"No error"`：错误码是数字，只有说明文字带引号 |
+| `*IDN?` | 整体带引号 | IEEE 488.2 规定为不带引号的 ASCII 文本。字段格式按 D1 保持不变，但去掉引号是另一回事 |
+
+以下回复格式正确：
+- 文件名、`CORR:CSET?`、`LIST:CAT?` 本来就是字符串。
+- 点数、`LIST:RUNN?`、损伤参数和 `LIST:FREE?` 已经是数字。
+
+各个 `property->value()` 的实际类型我没有逐个核对，默认它们是数值。
+
+## 2. 方案文档中的主要问题
+
+| 阶段 | 状态 |
+| --- | --- |
+| P1 状态与错误命令 | 已有 `*ESR?`、`*CLS`、`*OPC`、`SYST:ERR?` 及 Streaming 的 `STAT:OPER:COND?`。其余标准状态命令和错误队列扩容待实施 |
+| P2 Core 完成状态 | 已有原因集合和 `operationStateChanged`。没有 `operationFailed`，验证矩阵也没在设备上跑过 |
+| P3 `*OPC?` / `*WAI` | 已按消息边界实现，Debug 构建通过，未运行。`*RST` 后设备短暂断开时 `*OPC?` 可能提前通过，这个风险还没验证 |
+| P4 异步失败进入错误队列 | Streaming 已接入。Playback 下载返回 +10 和其他 Core TX 失败转发待处理 |
+| P5 Streaming / 桥接 | Streaming 已静态实现，ProgrammedArb 待接入 |
+| P6 / P7 | 未做 |
+
+## 3. Streaming 实施前的缺口
+
+- **`*OPC?` 提前返回。** `txsessionservice.cpp` 中，桥接管线调用 `setBridgedApplyRequest()` 或 `active()` 后紧接着就调用 `publishAppliedRequest()`，待完成原因随即清空。真正的设备配置（`m_operator.configuration` 和扫描配置）以及首包下载，都在 `streamingbussiness.cpp` 的发送线程里稍后才执行。所以 `SYST:TEST:STREAM:STAT ON;*OPC?` 会在设备配置完成前返回 `1`。
+- **修改 Streaming 参数完全不经过 Core。** `STREAM:SRAT`、`STREAM:SCAL` 和文件列表的修改走 `onSampleRateEditingFinished` 这类函数，只置 `m_profileChanged` 并唤醒工作线程，不调用 `requestRefresh()`。因此原因集合一直为空，`*OPC?` 和 `*WAI` 立即通过。
+- **失败不可见。** 配置失败时只发出 `deviceConfigurationEnd(errorStr)`，工作线程随后停下等待重新配置。SCPI 错误队列和 ESR 都收不到这个失败。
+- **普通 ARB 的桥接路径同样提前完成。** 这是 Playback 中 `providerParticipating == false` 的情况。
+
+上述 Streaming 缺口已按 §8 接入。普通 ARB 的桥接行为待独立处理。

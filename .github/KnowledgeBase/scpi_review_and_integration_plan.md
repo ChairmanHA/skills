@@ -1,6 +1,6 @@
 # SCPI 接入静态审阅与当前收口方案
 
-日期：2026-09-17
+2026-09-17 初审，2026-11-24 复核当前源码。
 
 ## 2026-11-10：幅度补偿 R&S 核心命令
 
@@ -230,11 +230,11 @@ sock.sendall(b"CORR ON\n")
 
 其他语法错误沿用 parser；错误不会通过夹值、截断 SCPI 数组或静默补齐变成成功。GUI CSV 超限处理是另一条交互合同，不代表 SCPI 允许截断。Reset 的清表/保留行为见本节开头；没有 CORR 私有清空命令。仅名称操作不影响补偿数据，真正的数据操作始终经过 owner 校验。
 
-## 2026-11-05：Level Offset 软件参考面
+## 2026-11-17：删除 Level Offset 软件参考面
 
-`POWer:OFFSet` / `POWer:OFFSet?` 已静态接入（短写 `POW:OFFS` / `POW:OFFS?`）。参数为有符号 dB，默认 0、范围 [-100,100]；接受裸数或 dB 后缀，拒绝 dBm/其他量纲、多参数、特殊/非有限数值。数值范围复用 PowerReferencePlane 的校验，越界报 DataOutOfRange 而不夹值。setter 只更新软件参考面和显示上下文，不触发 TX、扫描 Apply、RMS 目标重建或波形生成；query 返回该软件设置，不调用设备 API。
+按用户要求删除 POWer:OFFSet / POWer:OFFSet?（POW:OFFS / POW:OFFS?）注册与处理，不保留兼容命令。Level/RMS、Sweep Start/Stop、List Power 和 Minibar 不再做全局加减。原数值校验、RMS 不可用反馈、设备执行与回写语义保持。
 
-Level/RMS、Sweep Start/Stop 和 List Power 的 SCPI 绝对功率仍为用户参考面：set 在入口 toPort 一次，query 在出口 toUser 一次。内部 Minibar 协议 2 的数值及完整状态改为端口面，不改变外部 SCPI 合同；设备请求、IDevice::Profile 和查询回写始终为端口电平。尚未编译/运行，详见 [统一参考面设计](level_reference_plane_port_ipc_and_api_integration.md) 与 [实施 TaskLog](../TaskLog/2026-11-05_implement-level-offset-port-ipc.md)。
+CORR 命令和表格继续使用原 owner/API，两个不同频点填写相同补偿量可实现常量校正。新保存不写 common.LevelOffset，旧字段自然忽略，不自动迁移。半自动验收真源/生成文档同步删除旧命令与字段依赖，未执行设备验收。见 [本次 TaskLog](../TaskLog/2026-11-17_remove-level-offset-use-ucor.md)。
 
 ## 2026-10-23/26：内部基线自动化入口
 
@@ -246,6 +246,18 @@ Level/RMS、Sweep Start/Stop 和 List Power 的 SCPI 绝对功率仍为用户参
 | `SYSTem:TEST:SAVE "A_RMS.json"`（短写 `SYST:TEST:SAVE`） | 单个 `.json` 文件名；成功无响应 | 自动创建 `<runtime>/testcases/`，保存当前 GUI 配置和功率意图，同名文件覆盖。复用现有捕获/持久化实现，在 GUI 线程同步完成文件提交，不等待波形生成或设备执行。 |
 | `HCOPy:DATA?`（短写 `HCOP:DATA?`） | 本机 PNG 文件的绝对路径字符串 | 捕获主窗口并直接保存到 `<runtime>/images/`；成功返回带外层双引号的路径，失败返回 `""` 并入错误队列；不弹出截图保存提示。 |
 
+2026-11-17 增加本机波形测试命令（仅静态实现，未构建/实机验收）：
+
+| 前缀（均为 `SYST:TEST:` 下的短写） | 命令和契约 |
+| --- | --- |
+| `ARB:` | `FILE "name.wav"`、`FILE?`、`CLE`；`SRAT`、`ASC`、`SCAL`、`OFFS`、`USE`、`PER`及对应查询；`STAT ON/OFF`及查询。文件固定相对runtime/testcases/assets，只接收单个文件名。IQS-WAV缩放只读，写入报-221。 |
+| `STREAM:` | `FILE "name.wav"`替换列表、`APP "name.wav"`追加、`CLE`清空、`FILES?`按顺序返回逗号分隔文件名（空列表为空字符串）；`SRAT`、`SCAL`和`STAT`均可设置/查询。文件根同ARB；文件名不允许逗号。 |
+| `QUICK:` | `ASC`及查询，`FILE "QAM/16QAM_4MHz_1MHz.wav"`；相对当前QuickWaveFormData，复用业务根路径校验与异步加载，命令成功仅表示请求被接受，G12.12人工段确认加载成功后检查键盘。 |
+
+STAT ON选择对应业务并开MOD；关闭当前选中业务时关MOD，关闭未选业务不改变其他业务的MOD。RF/载波扫描不由该命令重设；文件为空时使能报-221。复用BusinessManager选择、属性编辑及已有applyRemoteEditorAction，MainWindow/TxSession继续负责执行。Streaming参数使用业务远程编辑入口，不触发GUI吞吐确认；确认框本身仍由M6人工测试。没有新播放器、线程、完成轮询或跨机器文件映射。普通WAV/IQS头部由Utils校验，业务仍决定格式/容量与参数归一化；非法文件名-224、不可用业务-241、读取/业务拒绝-200，非有限数值和不可精确表示的样点计数-222。只读字段-221。设置值经业务归一化后查询实际值。
+
+完整用法及更新后的用例见 `scripts/README_scpi_gui_baseline.md` 和 `testcases/semiautomatic_cases.json`。M1的large.wav由测试者本机一次性预置；其余新文件命令使用现有包内资源。保存/加载专项继续使用原LOAD/SAVE，不再通过派生JSON模拟普通波形参数修改。
+
 LOAD 路径由运行 SGStudio 的机器解析：相对路径固定以可执行文件目录的上一级为基准，即包含 `bin/`、`plugin/`、`configuration/` 的运行根目录，不跟随客户端或 SGStudio 的 cwd。绝对路径直接使用。例如可执行文件在 `<runtime>/bin/` 时，上述命令读取 `<runtime>/testcases/M-1.json`。SAVE 只接受文件名，不接受目录或绝对路径；`SAVE "A_RMS.json"` 固定写入与 bin 同级的 testcases，随后用 `LOAD "testcases/A_RMS.json"` 恢复。
 
 命令中的路径字符串必须为 ASCII。2026-10-23 实测直接发送桌面中文目录产生 -101 Invalid character，改为 `<runtime>/testcases` 下的同一 JSON 后加载正常。因此使用 ASCII 相对路径，脚本在连接前拒绝非 ASCII 路径；不修改 parser 来扩展协议。JSON 内的中文 WAV 路径仍由配置加载实现直接读取，不受命令文本这一限制。
@@ -256,7 +268,7 @@ LOAD 路径由运行 SGStudio 的机器解析：相对路径固定以可执行�
 
 错误沿现有 SCPI 错误队列上报：空白 LOAD 路径或非法 SAVE 文件名为 `-224`；无 MainWindow 为 `-241`；文件读取/JSON 对象解析/恢复、保存目录创建/JSON 提交、截图捕获/PNG 保存失败为 `-200`。可用 `*ERR?` 读取错误码；普通加载失败在恢复前返回，不把读取失败当作加载成功。原 `*ERR?` 的通用错误文字格式保持不变。截图失败仍有空字符串响应，客户端不必等待无响应超时。
 
-脚本按用户最新确认的简版流程执行：发送 LOAD 或设置命令 → 客户端等待 **100 ms** → 查询参数、RF/MOD/Sweep 及 `*ERR?` → 请求截图。大 WAV/IQS-WAV 可显式延长单组场景的客户端等待；服务器不添加 sleep、重试或完成状态轮询，`*OPC?` 当前仍固定返回 1。
+2026-10-23/26 的历史基线以客户端等待 **100 ms** 为默认值，大 WAV/IQS-WAV 场景可单独延长。当前脚本的固定间隔上限为 **20 ms**，普通检查点只发步骤需要的查询。必需的功率回读遇到 `9.91e37` 和 `-221` 时，在客户端超时范围内重读，波形生成、下载及 RF 稳定按验收步骤观察。使用说明见源码仓库的 `scripts/README_scpi_gui_baseline.md` 和 [SCPI 回读精简记录](../TaskLog/2026-11-23_simplify-scpi-readbacks-and-awgn-power.md)。
 
 2026-10-23 按用户本机运行脚本和程序的部署方式，取消最初的 PNG 二进制响应，保留命令名并直接在服务器保存。例：`HCOP:DATA?` → `"D:/development/vsg2.0/images/20261023_153012_123.png"`。文件名采用 `yyyyMMdd_HHmmss_zzz.png`，适配 100 ms 检查点。仅用控制连接读取一行路径，无须 5125 数据通道或二进制块读取。`images/` 与配置的相对路径使用同一运行根目录锚点，不依赖 cwd。
 
@@ -276,44 +288,19 @@ LOAD 路径由运行 SGStudio 的机器解析：相对路径固定以可执行�
 
 ## 结论
 
-当前 SCPI 接入已经具备可复用的 parser / transport 基础，但产品集成层仍主要是“SCPI 远程驱动 UI + 写 Property”的过渡实现，而不是稳定的仪器控制服务。
-
-对一个简单信号源来说，现有 `TxSessionService / TxApplyRequest / TxPipelineRuntime` 机制不需要为了第一阶段 SCPI 做大改。`Center`、`Level`、`RF`、`Mod`、参考时钟、触发、RF Port 等公共参数已经有共享 Property、UI binding、`CommonDeviceProfile`、`TxSessionService::requestRefresh()` 和 runtime writeback 链路。只要 SCPI 在 GUI 线程上按现有语义写这些共享状态，并触发已有 completion signal，UI 同步和 runtime apply 都有现成路径。
-
-真正需要收口的是 SCPI 命令层的边界、错误语义、完成语义和安全/配置策略。Claude Opus5 的审核结论与这个判断基本一致，并补充了几个更务实的落地判断：当前命令面不必立即砍到 Core-only；在明确“UI 必须存在、命令成功表示意图被接受”的过渡契约后，可以保留已有命令面，按族逐步迁移到 UI 无关 service。
+SCPI 的 TCP 收包、libscpi 解析和产品命令处理在 GUI 线程串行执行。`src/libs/scpi` 提供 transport、命令注册、解析和错误队列，`src/plugins/scpi` 将命令接到共享 Property、Core 服务或现有界面。Core 管线的设备 I/O 由 worker 执行。软件设置或提交之后，波形准备和设备执行可以继续在后台进行。
 
 ## 证据来源
 
-当前本地代码复核过的关键位置：
-
-- `src/plugins/scpi/scpi.json`
-- `src/plugins/scpi/register/scpiregister.cpp`
-- `src/libs/scpi/src/parser/parser.cpp`
-- `src/libs/scpi/src/transport/transport_tcp.cpp`
-- `src/libs/business/numericproperty.h`
-- `src/plugins/core/txsessionservice.cpp`
-- `src/plugins/core/commondeviceprofile.cpp`
-- `src/libs/business/propertybindingmanager.cpp`
-
-关联架构文档：
-
-- `tx_execution_context_phase1_and_provider_migration.md`
-- `ui_independent_runtime_and_minibar_design.md`
-- `plugin_metadata_and_loading_architecture.md`
-- `cmake_thirdparty_module_best_practices.md`
-- `.github/TaskLog/2026-08-14-scpi-p0-fixes.md`
+- 构建入口为 `src/plugins/scpi/CMakeLists.txt`、`src/libs/scpi/src/CMakeLists.txt`、`src/plugins/core/CMakeLists.txt` 和 `3rdParty/scpi-parser-2.3/CMakeLists.txt`。本轮按当前源码 `92f371e0` 静态复核。
+- 协议层见 `transport_tcp.cpp`、`scpi_engine.cpp`、`parser.cpp`、`scpi_context.cpp`。产品层见 `scpi.json`、`scpidialog.cpp`、`register/scpiregister.cpp`。设备执行及回写见 `txsessionservice.cpp`、`txpipelineruntime.cpp` 和 `devicemanager.cpp`。
+- SCPI 已接入 Core TX 完成判定。状态寄存器扩展、桥接业务自身的完成通知和异步失败上报仍待实施。相关资料见 [TX 执行与回写](tx_execution_context_phase1_and_provider_migration.md)和 [分阶段方案](../TaskLog/2026-11-09_scpi-status-and-opc-implementation-plan.md)。
 
 ## 已确认的可复用部分
 
-SCPI 基础设施本身方向是合理的：
-
-- 使用成熟 SCPI parser，而不是手写协议 parser。
-- `src/libs/scpi` 与 `src/plugins/scpi` 分层，transport/parser 没有直接放进业务插件。
-- TCP transport、Parser 和当前产品 handler 在 GUI 线程执行；Parser FIFO 保持命令顺序，`mDraining` 防止嵌套事件循环递归进入共享 libscpi context。
-- `Parser::stop()` 拒绝新命令并清空重入期间的待处理队列，析构路径不再等待 SCPI worker。
-- `SCPIDialog` 作为启停和日志入口可以保留，但它不应成为命令行为 owner。
-
-这些优点不要求保留 UI 自动化式命令实现。长期稳定形态仍应把命令映射到 UI 无关的 intent/service。
+- `TransportTCP` 为每个连接组装程序消息，支持拆包、多行和 IEEE 定长数据块，单条消息上限为 16 MiB。响应通过各自连接的 queued write 写回。`HCOP:DATA?` 通过控制连接返回服务器上的文件路径。
+- `Parser` 共用一个 libscpi context 和 FIFO，`mDraining` 使嵌套事件循环中收到的命令排队。`pushCommand()` 直接调用 `SCPI_Parse`，其中没有固定 sleep。`ScpiEngine::stop()` 停止接收命令并清理队列，然后关闭 transport。
+- `scpi.json` 已声明 `Core` 依赖。SCPI 对话框负责手动启停和日志，默认控制端口为 5025、数据端口为 5125。
 
 ## 2026-09-17 已落地：退出死锁与日志洪泛收口
 
@@ -332,256 +319,69 @@ SCPI 基础设施本身方向是合理的：
 
 ## 当前仍存在的问题
 
+### 1. 部分命令仍由主窗口或业务面板执行
 
-### 1. SCPI 命令仍依赖 UI 对象和可见主窗口
+- `Center`、`Level`、`RF` 的设置走共享 Property 和现有编辑通知。`LIST` 的表格和载波计划分别由 `MScanTableService` 和 `TxSessionService` 处理，`CORR` 走 `PowerReferencePlane`，损伤设置走 `SignalImpairmentsSettings`。这些 handler 已有明确的业务入口。
+- `OUTP:MOD:STAT` 调用 `CommonPanel::triggerModButton()`，`SWE:STAT ON` 操作 `StepSweepPanel` 并调用 `showSweepPage()`，参考时钟输出、Low Power 和部分调制启停仍经面板入口。`SYST:TEST:LOAD/SAVE` 和 `HCOP:DATA?` 复用主窗口的配置、保存和截图逻辑。
+- 在当前桌面应用中，SCPI 从主窗口所属的对话框启用，启用后关闭该对话框也能继续处理命令。现有依赖是主窗口和相关面板的生命周期，普通命令无需一直显示 SCPI 对话框。若后续提供 headless 入口，应先迁移实际依赖面板的业务操作，复用现有 owner 和 UI 回写机制。
 
-观察：
+### 2. 错误队列支持 Streaming 异步失败
 
-`scpiregister.cpp` 仍直接调用 `MainWindow::instance()->commonPanel()`、`sweepPanel()`、`showSweepPage()`、`deviceSettingPanel()`，并通过 `Panel::triggerBtnEnabledChecked(...)` 触发业务 panel 上的 enabled switch。
+- `scpi::context::reportError()` 通过 `SCPI_ErrorPushEx` 上报错误。List、CORR、损伤、RMS、测试 LOAD/SAVE 和截图已有明确错误码。`*ERR?` 从全局 10 项错误队列逐条取出，回传错误码和通用译文。`*CLS` 清空错误队列和事件寄存器，取消挂起的 OPC 登记。`*ESR?` 读取并清除标准事件寄存器。`SYST:ERR?` 和 `SYST:ERR:NEXT?` 读取同一队列并返回详细原因。Streaming 启动、重配或读文件失败进入队列并置 ESR bit 3。
+- 旧 handler 的 Property 缺失、只读、业务不可见，以及断开设备后的 `*IDN?`，仍有只写日志并返回失败的路径。libscpi 在 handler 返回失败且未主动报错时补入通用 `-200 Execution error`。因此客户端可以检测到失败，但有些路径缺少可据以处理的错误码或设备详情。
+- 设备 apply 失败由 `TxPipelineRuntime` 经 `deviceConfigurationDone` / `applyStateChanged` 回报给 Core。SCPI 没有订阅并将这些异步失败加入错误队列。`*RST` 触发 `ACTION_PRESET` 和 MScan 重置，当前 Preset 代码直接调用 `resetDevice()`，无确认框。设备 reset 失败当前只记日志，SCPI handler 仍返回动作已触发。
 
-当前这条路径在“主 UI 一定存在、SCPI 从 UI 中启停、允许 SCPI 同步改变 UI 显示状态”的约束下可以工作，但它是过渡契约，不应成为长期架构。
+### 3. 完成命令覆盖 Core 与 Streaming
 
-风险：
+| 入口 | 当前行为 |
+| --- | --- |
+| `*OPC?` | 必须是程序消息的最后一条命令或独占一条消息。整条消息解析完后，Core 忙时暂缓整行回复和后续消息，首次空闲后一起回复。按 IEEE 488.2 返回 NR1 数字 `1`（不带引号；2026-11-24 前为 `"1"`，不保留兼容）。 |
+| `*WAI` | 同样必须位于消息末尾或独占一条消息。Core 忙时暂缓下一条程序消息，命令本身没有响应。 |
+| `*OPC` | 可位于消息任意位置。登记一次完成事件并继续解析。空闲时置 ESR bit 0，读取 `*ESR?` 可取得该位。`*CLS` 和 `*RST` 均取消挂起的登记。 |
 
-- MainWindow 或 panel 未构造时会崩溃或返回不明确失败。
-- UI 翻页、按钮点击、modal dialog 等视觉行为进入协议路径。
-- 隐藏 UI、helper/headless、插件加载顺序变化时风险变大。
-- 命令实现 include widget 类型名，违背 `ui_independent_runtime_and_minibar_design.md` 的方向。
+等待只作用于程序消息边界，由 `src/libs/scpi` 的 Parser 在 libscpi 原生 `SCPI_Parse` 返回后执行，第三方解析器不做修改。`*WAI` / `*OPC?` 后面若还有 `;` 分隔的命令，该命令报 `-100 Command error`（附 "must end the program message"），不产生等待或 `"1"`，其余命令照常执行。不保留旧脚本同一行中途屏障的兼容。
 
-建议：
+所有连接共用解析 FIFO。等待中的消息保留同一行已产生的查询结果，后续消息和其他连接的新消息排队。Core 已空闲时立即通过。无可用设备且无切换时也会通过。普通 Property 查询仍读取软件状态。
 
-- 近期先补齐 `MainWindow::instance()`、`commonPanel()`、`sweepPanel()`、`deviceSettingPanel()`、`business->controlPanel()` 的空指针检查。
-- 中期把 Common、Sweep、调制业务逐步迁移到 UI 无关 intent/service。
-- 当前保留 UI 触发路径时，必须在 SCPI 手册中写清楚“UI 必须存在”。
+Core 自 2026-11-24 起提供主线程查询 `TxSessionService::pendingOperationReasons()`，原因集合变化时发出 `operationStateChanged()`。在设备可用时，刷新请求同步登记，并覆盖后续的波形准备、设备 apply 与结果回写。配置批处理、设备切换、能力协调和 Core 向桥接业务交接也参与判定。切换中的短暂断开保留切换原因，普通断开后集合为空。空集合表示当前没有待完成的 Core TX 操作，成功与失败均可到达此状态。MScan 只跟踪实际进入执行链的操作。[Core 实施记录](../TaskLog/2026-11-24_core-tx-operation-state.md)
 
-### 2. 命令错误没有进入 SCPI 错误队列
+Streaming 启动、运行中改参和停止都参与等待。启动与重配持续到设备配置结束且 `tx_send_stream()` 接受首个 IQ 块，停止持续到发送线程结束当前设备 I/O。播放继续时，`STAT:OPER:COND?` 的 bit 10 为 1。启动／重配失败先将 `-300` 和详细原因写入错误队列，再解除等待。普通断开也会解除等待。Streaming 的设备时序待验收。[Streaming 实施记录](../TaskLog/2026-11-24_streaming-scpi-operation-completion.md)
 
-观察：
+ProgrammedArb 的桥接 I/O 和其他 Core TX 异步失败转发待接入。
 
-- `PRPOERTY_NULL_CHECK` / `PANEL_NULL_CHECK` 失败主要 `qDebug()` 后返回失败。
-- 产品侧命令失败没有统一调用 `SCPI_ErrorPush`。
-- `*ERR?` 主要只能读到 libscpi parser 自身的通用错误，读不到“无设备、业务不可见、参数越界、内部对象未初始化”等真实原因。
+例如先发 `FREQ:MODE LIST;OUTP:STAT ON;*OPC?`，再发 `LIST:RUNN?`，后者会在 Core 操作结束后读取 MScan 生效状态。连续扫描的轮次、具体频点和实际 RF 稳定时间须另行观测。[实现与回归用例](../TaskLog/2026-11-24_scpi-operation-barriers.md)
 
-风险：
+### 4. 启用后控制和数据端口监听所有接口
 
-- 自动化客户端无法可靠定位失败原因。
-- 同一类失败在不同 handler 中表现不一致。
-- `std::nullopt` 或空响应不足以表达仪器协议错误。
+`TransportTCP::start()` 和 `DataChannel::start()` 均使用 `QHostAddress::Any`。监听由 SCPI 对话框手动启用，两条通道当前无应用层身份验证或绑定地址配置。部署文档应写明启用时的实际监听范围。改变默认绑定方式需考虑现有 LAN 控制用法。
 
-建议：
+### 5. 端口设置只保留到进程退出，数据通道失败已有处理
 
-- 建立一个产品侧错误上报 helper，把内部失败映射为 SCPI 错误队列。
-- 至少区分：无设备、功能不可用、参数非法/越界、状态冲突、内部错误。
-- 所有命令失败路径先推错误，再返回 `SCPI_RES_ERR` 或等价失败结果。
+- 默认 5025/5125 来自 `ScpiRegister::init()`。对话框把编辑值写入当前 `ScpiServer`，重开窗口读取当前值，重启进程恢复默认值。启用时只检查 `toUInt()` 是否成功，监听前转为 `quint16`。普通文本框输入 `65536` 可通过当前转换检查，最终按端口 0 请求监听，界面仍显示请求值。aarch64 专用数字键盘的范围是 0 到 65535。
+- `ScpiEngine::start()` 以控制端口监听为启动成功条件。数据端口失败记入日志，控制端口可继续工作。控制端口失败则回滚已启动的数据监听，并取消对话框中的启用状态。现有产品 handler 未调用 `ScpiServer::transferData()`，定长块输入和截图路径查询均走控制端口。
 
-### 3. `*OPC?` / `*WAI` 没有真实完成语义
+### 6. 部分旧 setter 会夹取有限越界值
 
-观察：
+`parseDouble()` / `parseUnits()` 已拒绝非有限值和不支持的特殊数值。`CORR` 数组、List 数据、`IQ:IMPairment` 等另有各自的业务校验。`FREQ:CENT` 和 `POW:LEV` 在解析成功后直接写 Property，`NumericProperty::setValue()` 按当前 metadata 的范围夹值。发送低于 Center 下限的有限值时，软件回读会显示边界值，setter 无专门的越界错误。
 
-- `Parser::init()` 中 `*OPC?` 仍硬编码返回 `"1"`。
-- `ScpiRegister::onWait()` 直接 `return true`。
-- set 命令当前多为“属性已写入 / UI switch 已触发”即成功，不代表设备配置已经完成。
+2026-11-02 的回写修复保留了 GUI 和业务的归一化，并使 Pulse DutyCycle 写入复用 Width 的编辑和生成路径。对 SCPI 的有限值范围，应逐族确认哪些属于允许归一化、哪些应拒绝，并以实际设备/业务的约束为依据。
 
-风险：
+### 7. 部分调制命令仍依赖业务名称精确匹配
 
-- 自动化脚本看到 success 时，设备可能还没 apply 完。
-- `*OPC?` 和 `*WAI` 不能用于可靠排序。
-- 用户会把“意图接受”和“硬件已完成”混为一谈。
-
-建议：
-
-- 短期明确文档契约：当前 set 命令成功表示“SGStudio 已接受控制意图”，不表示设备已经应用。
-- 长期把 `*OPC?` / `*WAI` 接到 `TxSessionService` 的 apply 完成状态，例如 `appliedStateChanged`、`deviceConfigurationDone`、`sweepConfigurationDone`。
-- 推荐长期语义：set 命令入队后可快速返回，`*OPC?` / `*WAI` 等待 apply 队列空闲并能读取最近一次 apply 结果。
-
-### 4. `*RST` 可能被 UI modal 阻塞
-
-观察：
-
-`onReset()` 触发 `ACTION_PRESET`。当前 handler 直接在 GUI 线程执行；如果 Preset 打开模态确认框，当前 SCPI 命令仍要等用户结束该交互后才能完成。
-
-风险：
-
-- 如果 Preset 触发模态确认框，协议命令会被 UI 交互延迟到用户点击之后。
-- 自动化环境下这会表现为命令卡死。
-
-建议：
-
-- 为 SCPI 提供不弹窗的 preset/reset intent。
-- 或把 `*RST` 明确标注为 UI 交互命令，不推荐自动化使用。
-
-### 5. TCP 绑定地址和安全策略不明确
-
-观察：
-
-`TransportTCP::start()` 使用 `QHostAddress::Any` 监听控制端口。
-
-风险：
-
-- 默认向所有网卡开放 5025。
-- 当前没有认证、访问控制或显式 LAN opt-in。
-
-建议：
-
-- 产品定位如果是本机自动化，默认改为 `QHostAddress::LocalHost`。
-- 如果产品定位就是网口仪器，保留 `Any` 也可以，但 UI 和文档必须明确“已对局域网开放且无鉴权”。
-- 后续可增加 bind address 配置和持久化。
-
-### 6. 端口配置未持久化，数据通道策略不清晰
-
-观察：
-
-- `SCPIDialog` 可编辑 TCP/data 端口，但当前没有落 `Settings`。
-- 默认端口仍由 `ScpiRegister::init()` 设置。
-- 当前 `ScpiEngine::start()` 已能在控制通道失败时返回 false，但 data channel 失败时是否允许降级仍缺少产品策略。
-
-风险：
-
-- 用户重启后端口配置丢失。
-- 自动化部署不能稳定依赖 UI 中改过的端口。
-- data channel 失败的告警/降级语义不明确。
-
-建议：
-
-- TCP/data 端口都走 `Utils::Settings` 持久化，并做范围和冲突校验。
-- 明确 data channel 是可选通道还是必需通道；若可选，应在 UI 显示 degraded 状态。
-
-### 7. 参数越界被全局 `NumericProperty` clamp 掩盖
-
-观察：
-
-`NumericProperty::setValue()` 会按 metadata min/max 对所有写入方 clamp。
-
-2026-11-02 参数回写修复保留了基础 metadata 夹值和既有有限输入归一化策略，设备联动上限仍由各 business resolver 负责。公共键盘不再用旧通知或 adapter 文本覆盖最终属性显示。Pulse 的 DutyCycle 写入改为由业务 `editingFinished` 换算 Width 并触发同一 resolver；派生刷新只镜像属性，避免仅修改 UI 属性而未重新生成波形。
-
-同轮在 SCPI 输入边界为 `parseDouble/parseUnits` 增加有限值检查，NaN/Inf/溢出和不支持的特殊数值返回既有 `-222 Data out of range`，不进入 Property。上述修改仅静态验证；下列“有限越界是否拒绝”的协议策略建议仍不等同于已实现行为。
-
-风险：
-
-- SCPI 发越界参数时可能被静默夹到边界并返回成功。
-- 这不符合常见 SCPI 行为，自动化客户端无法知道请求值无效。
-- 这个变化影响所有 UI/业务调用方，不只是 SCPI。
-
-建议：
-
-- SCPI handler 在写 Property 前先按 metadata 校验。
-- 越界直接推 `-222 Data out of range` 或项目定义的等价错误。
-- 全局 clamp 是否保留应作为 UI/Property 行为单独评审，不应作为 SCPI validation 策略。
-
-### 8. 业务查找依赖显示名
-
-观察：
-
-部分命令通过 `BusinessManager::getBusinessByName(...)` 查找业务，名称包含 UI 显示字符串，例如带换行或空格的调制业务名。
-
-风险：
-
-- i18n、文案、空格、换行调整都可能破坏 SCPI。
-- 失败没有编译期保护，运行时也不易定位。
-
-建议：
-
-- 给业务引入稳定 ID。
-- SCPI 使用稳定 ID 或业务注册表，不使用显示名。
-
-### 9. 第三方 parser vendoring 较宽，但不是当前功能阻塞项
-
-观察：
-
-`3rdParty/scpi-parser-2.3` 包含 examples、tests、`.github`、CVI 工程等上游文件，但本项目 CMake 只编译 `libscpi/src`。
-
-影响判断：
-
-- 对当前编译和运行通常没有直接影响。
-- 主要问题是代码审查噪声、仓库体积、供应链/许可证审计、未来升级 diff 可读性。
-- 因此它不是 P0 correctness bug，可以后续单独做第三方依赖卫生清理。
-
-建议：
-
-- 后续单独提交裁剪或重整，只保留产品构建需要的 `libscpi/inc`、`libscpi/src`、LICENSE、版本说明和本项目 CMake wrapper。
-- 如果保留完整上游树，也应补充 vendoring note，说明哪些目录不参与产品构建。
+`PANEL_NULL_CHECK` 调用 `BusinessManager::getBusinessByName()`，与 `IBusiness::name()` 逐字比较。Digital 使用含换行、末尾空格的 `Digital\nMod `，翻译后的 `fullName()` 是另一字段。改动该字面键会影响查找；同一个 `name()` 也被 `BusinessManager` 用在配置读写中。后续迁移调制命令时，可在业务注册处提供稳定的查找键，同时保留已有配置的名称兼容。
 
 ## 当前推荐落地顺序
 
-### 近期：保留命令面，补齐产品可用性
-
-当前不建议立刻删除大量已注册调制命令。更务实的方式是：
-
-1. 明确过渡期契约：SCPI 需要主 UI 存在；命令成功表示意图接受，不表示设备 apply 完成。
-2. 补齐 `MainWindow` / panel / business 的空指针检查。
-3. 给所有失败路径接入 SCPI 错误队列。
-4. 修正 `scpi.json` metadata 和真实依赖。
-5. 为 `*RST` 提供不弹窗路径，或在文档中限制自动化使用。
-6. 去掉 parser 固定 sleep 前，先设计真实完成语义。
-7. 明确 bind address、安全提示、端口持久化和 data channel 降级策略。
-
-### 中期：引入 `ScpiIntentService`
-
-目标是让命令实现不再 include widget 类型：
-
-```text
-Core::ScpiIntentService
-```
-
-职责：
-
-- 校验 SCPI 参数。
-- 写共享 Property 或业务 intent。
-- 触发已有 semantic completion signal。
-- 触发 `TxSessionService::requestRefresh()` 或等价路径。
-- 读回共享状态或 runtime snapshot。
-- 把内部失败翻译成 SCPI 错误。
-
-第一批接口可以很小：
-
-```text
-idn()
-setCenterFrequency(double hz)
-centerFrequency() const
-setLevel(double dbm)
-level() const
-setRfEnabled(bool enabled)
-rfEnabled() const
-setModEnabled(bool enabled)
-modEnabled() const
-resetPreset()
-```
-
-### 长期：按族迁移 UI 依赖
-
-Step A：Core/Common 命令
-
-- `Center`、`Level`、`RF`、`Mod`、参考时钟、触发、RF Port。
-- 这些已经是共享 Property，最容易迁移。
-- `OUTP:MOD:STAT` 应从 `commonPanel()->triggerModButton()` 改为写 `Mod` 属性。
-
-Step B：Sweep 命令
-
-- 引入 UI 无关的 sweep enabled 和参数 owner。
-- `StepSweepPanel` 只显示状态和处理用户输入，不作为 SCPI command target。
-- 去掉 `showSweepPage()` 这类视觉行为在协议路径中的必要性。
-
-Step C：调制业务命令
-
-- 给业务层增加 UI 无关 enable/disable intent。
-- Panel 只做显示与用户输入。
-- SCPI 不再点击 `SwitchButton`。
-- 逐族替换 `getBusinessByName(displayName)` 为稳定业务 ID。
+1. 设备 apply 相关 setter 成功表示软件已接受请求。使用完成命令等待 Core 到达终态，按具体状态查询确认应用结果。
+2. 按 [分阶段方案](../TaskLog/2026-11-09_scpi-status-and-opc-implementation-plan.md)验证配置恢复、波形生成和下载、扫描、失败及断开，补充异步失败上报和桥接业务完成依据。
+3. 按命令族收口有实际影响的缺口。优先核实有限越界的公开行为、Reset 失败反馈、端口输入边界及 LAN 使用约定。迁移 UI 依赖时沿用已有 Property 或 Core 服务，剩余 MOD/Sweep/调制启停再按各自业务 owner 接入 UI 无关入口。
 
 ## 后续 SCPI patch 审查清单
 
-1. 命令实现里是否出现 widget 类型名？出现则需要说明为何仍处于过渡期。
-2. 命令写的是共享 Property / typed intent，还是在点击 UI？
-3. UI 是否通过现有 binding/writeback 更新，而不是被 SCPI 特判刷新？
-4. `TxSessionService` 是否只收到一条明确 refresh 路径？
-5. 命令成功表示“意图接受”还是“设备 apply 完成”？文档是否同步？
-6. 无设备、功能不可用、参数越界、内部错误是否进入 SCPI 错误队列？
-7. `*OPC?` / `*WAI` 是否与实际完成语义一致？
-8. 插件 metadata 是否声明真实依赖？
-9. TCP bind address、安全提示、端口持久化是否符合产品定位？
-10. 第三方依赖是否说明了构建使用范围和许可证来源？
-11. SCPI 路径是否重新引入了 worker blocking 回 GUI、析构 join worker 或逐条 UI 日志事件？
+1. 参数范围、业务规则和结果由哪个现有组件负责？设置和查询各自使用配置、提交数据还是设备结果？
+2. 依赖了哪个 UI host 或注册名称？前面板与 SCPI 能否共用业务入口与正常回写？
+3. 同步拒绝与异步失败如何被客户端识别？完成命令等待到哪个阶段？
+4. 同一程序消息的相对命令头、各查询响应顺序、定长块处理和嵌套事件循环行为是否兼容？
+5. 控制与数据通道的启动结果、监听范围和端口显示是否与实际一致？
 
-## 底线
-
-当前 SCPI 支持可以作为“UI 可见条件下的过渡控制通道”继续推进，但不要把 UI 自动化路径包装成最终架构。正确方向不是重写 `TxApplyRequest` 或 `TxPipelineRuntime`，而是新增一层窄的 SCPI intent/service：它复用现有 Property、Profile、TxSessionService 和 runtime writeback，同时提供仪器协议需要的参数校验、错误队列、完成语义和安全配置。
+第三方 libscpi 的 CMake 目标仅编译选定的 `libscpi/src` 源文件，随库保留的示例和上游测试不进产品目标。目录裁剪和许可证整理属于第三方依赖维护。

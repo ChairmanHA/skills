@@ -4,6 +4,8 @@
 
 > 2026-03-31 更新：本文仍主要关注“双线程 + 队列”的数据流本体。`FixedStream / SweepStream` 当前已经通过 `MainWindow` 桥接到 `StreamingBussiness`，且 `fileList` 为空时不再由 workerLoop 内部额外配置 `Mute` 兜底。关于当前桥接实现以及下一步 `在线热切 / RearmSession / HardReboot` 的设计基线，见 `streaming_bridge_rearm_reboot_refactor_plan.md`。
 
+> 2026-11-24 更新：启动、重配、停止与 IQ 队列共用同一个操作代次。Core 等到当前代次的首包成功、失败或停止确认后解除 SCPI 屏障。[实施记录](../TaskLog/2026-11-24_streaming-scpi-operation-completion.md)
+
 > 相关核心文件：
 >
 >- `src/plugins/htra/streamingbussiness.{h,cpp}`
@@ -61,33 +63,19 @@ UI(StreamingPanel) ──(PropertySystem属性值变更/编辑结束)──▶ S
 
 ### 2.2 `StreamingBussiness`（业务调度层）
 
-- 继承 `Core::IBusiness`，由框架负责激活/停止。
-- 维护一个发送线程 `m_senderThread`，在线程里运行 `workerLoop()`：
-  - **设备配置阶段**：当 profile 变化时，切换设备模式（Stream）并调用 `m_operator.configuration()`。
-  - **实时下发阶段**：循环调用 `streamingDataGenerator->processRequests()`，阻塞等待队列数据并下发。
-- 负责“参数变化→全链路重启”的协调：
-  - Property 的 `editingFinished` 触发 `m_profileChanged=true` 并更新 `StreamingDataGenerator`。
-  - `onDeviceProfileChanged()` 触发时（公共设备参数变化），置 `m_profileChanged=true` 并 `streamingDataGenerator->interrupt()`。
-- 负责播放进度统计：每 1s 依据已发送 sample 数计算进度百分比并 `emit playbackPosChanged()`。
+- 主线程接收编辑、启动和停止，按代次提交文件、公共设备参数和 carrier plan 快照。
+- sender 线程执行设备配置及实时下发。启动或重配成功以首包为准，停止以当前设备 I/O 已结束为准。
+- 当前代次的结果在主线程发布，并进入 Core 操作完成判定。失败先发布错误，再结束等待。
 
 ### 2.3 `HTRA::StreamingDataGenerator`（数据生产层）
 
-- 内部自带生成线程 `m_workerThread`，在线程里运行 `workerLoop()`：
-  - 监听配置变化（fileList/iqScale/sampleRate）或 enabled 变化；
-  - 打开 fileList 中的 WAV 文件，解析 `WavHeader` 得到 data 块位置/大小；
-  - 按固定帧大小生成 IQ 数据块，做 IQScale 缩放；
-  - 将 `DeviceDataRequest{data, sampleRate}` 交给 `DataSender::enqueueRequest()`。
+- `m_workerThread` 获取当前文件列表、IQScale 和采样率的快照，打开普通 WAV 或 IQS-WAV，按文件顺序组帧。
+- 通过 `DataSender::enqueueRequest()` 提交 IQ 数据、采样率和实际源点数。无法打开有效源或读取数据失败时，同一队列传递错误。
 
 ### 2.4 `HTRA::DataSender`（队列与背压控制）
 
-- 线程安全队列 `QQueue<DeviceDataRequest> m_queue`。
-- 两个条件变量实现背压：
-  - 生产者 `enqueueRequest()`：当 `m_queue.size() >= m_maxQueueSize(10)` 且运行中时阻塞。
-  - 消费者 `processRequests()`：当队列为空且运行中时阻塞。
-- `interruptProcessing()`：
-  - `m_running=false`，唤醒所有等待线程，并清空队列（由调用方逻辑触发）。
-- `restartProcessing()`：
-  - `m_running=true`，恢复生产/消费。
+- `QQueue<DeviceDataRequest>` 最多容纳 10 个块。生产者在队列满时阻塞，消费者在队列为空时阻塞。
+- `reset(revision)` 清空队列并唤醒生产者、消费者。过期生产者停止入队，过期消费者退出下发循环。
 
 ### 2.5 设备接口层（从 Business 到硬件）
 
@@ -116,9 +104,8 @@ UI(StreamingPanel) ──(PropertySystem属性值变更/编辑结束)──▶ S
 - UI：`PropertyBindingManager` 将按钮绑定到属性。
 - UI：`beginEditing` 时弹出触控数字键盘；键盘结束后属性触发 `editingFinished`。
 - Business（`StreamingBussiness`）：监听属性 `editingFinished`：
-  - `m_profileChanged = true;`
-  - `streamingDataGenerator->setSampleRate(...)` 或 `setIqScale(...)`。
-- Generator：setter 内部 `emit *Changed()`；若非 resetting 且已 enabled，会调用 `interrupt()` 触发“全链路重启”。
+  - 调用 `setSampleRate()` 或 `setIqScale()` 保存编辑值。运行中提交新代次。
+- SCPI 通过业务远程编辑入口提交同样的值，沿用界面的参数归一化。
 
 #### FileList
 
@@ -126,10 +113,7 @@ UI(StreamingPanel) ──(PropertySystem属性值变更/编辑结束)──▶ S
 - UI：属性 `valueChanged` 会触发 `onFileListPropertyChanged()`，用于刷新列表与统计信息。
 - 文件拖放（2026-10-26，静态核对）：`StreamingFileTable` 自行处理 `startDrag/dropEvent`，以行间插入位置发出 `fileMoveRequested(sourceRow, destinationRow)`；`StreamingPanel` 在权威 `Streaming_FileList` 上按行索引移动，再通过属性刷新重建文件名/点数/采样率三列。不要依赖 `QTableWidget::InternalMove` 的默认单元格搬移或模型 `rowsMoved`；默认搬移不能保证完整行排序，且拖放结束后的源项清理可能再次破坏已刷新的内容。
 - 只有最终路径列表发生变化时，拖放才提交一次 `editingFinished`；取消、原位拖放和交换相同路径且列表值不变时不触发重配置。拖动期间列表重建会使源 `QPersistentModelIndex` 失效，该次拖放被取消。
-- Business：监听 `fileListProperty->editingFinished`：
-  - **必须先** `streamingDataGenerator->setFileList(...)`，再 `m_profileChanged=true`。
-    - 原因：sender 线程会在看到 `m_profileChanged` 后立刻调用 `streamingDataGenerator->toProfile()` 读取 `fileList` 并决定设备模式（空=Mute，非空=Stream）。
-    - 若顺序对调（先置 `m_profileChanged`），在 Release 下可能出现线程竞态：sender 线程先一步读取到旧的空 `fileList`，把设备继续配置在 Mute，随后即使 generator 开始产数/下发，也可能表现为“无波形”。
+- Business 监听 `editingFinished`，更新文件顺序后提交用来重配和生成的快照。
 
 #### “回写”机制（Generator → Property）
 
@@ -157,8 +141,8 @@ Business 也监听 Generator 的 `*Changed` 信号，把 Generator 的当前值�
 - `BusinessManager` 会在设备 open/close、设备切换时触发 `activedBusiness->startBusiness()` 或 `stopBusiness()`。
 
 对 Streaming 来说：
-- `startBusiness()` → 允许发送线程循环 & 开启 Generator 的 enabled。
-- `stopBusiness()` → 关闭 Generator、等待发送线程退出下发循环、清空统计并回到 0%。
+- `startBusiness()` 提交启动。sender 配置硬件，generator 开始生成。
+- `stopBusiness()` 提交停止并清队列，等 sender 结束设备 I/O，然后将进度归零。
 
 ---
 
@@ -170,59 +154,22 @@ Business 也监听 Generator 的 `*Changed` 信号，把 Generator 的当前值�
 - **Generator线程**：`StreamingDataGenerator::m_workerThread`。
 - **Sender线程**：`StreamingBussiness::m_senderThread`。
 
-### 5.2 典型阻塞点
+### 5.2 阻塞与唤醒
 
-1) Sender线程阻塞点：
-- `StreamingBussiness::workerLoop()` 内部循环调用 `streamingDataGenerator->processRequests()`。
-- `processRequests()` 会进入 `DataSender::processRequests()` 并在队列为空时阻塞：
-  - 阻塞条件：`m_running == true && m_queue.isEmpty()`。
-  - 唤醒条件：`!m_running || !m_queue.isEmpty()`。
-
-2) Generator线程阻塞点：
-- `StreamingDataGenerator::workerLoop()` 在 `m_profileChanged == false` 时 `m_condVar.wait()`。
-- `DataSender::enqueueRequest()` 在队列满时阻塞：
-  - 阻塞条件：`m_running == true && m_queue.size() >= m_maxQueueSize`。
-  - 唤醒条件：`!m_running || m_queue.size() < m_maxQueueSize`。
-
-### 5.3 interrupt / restart 的作用
-
-当参数变化或停止时，会调用：
-
-- `DataSender::interruptProcessing()`：
-  - 令 `m_running=false`；
-  - 唤醒生产者/消费者；
-  - 让阻塞的 `enqueueRequest/processRequests` 立即返回并清空队列。
-
-当开始正常工作时：
-
-- `DataSender::restartProcessing()`：
-  - 令 `m_running=true`；
-  - 恢复正常阻塞/唤醒节奏。
+- 两个 worker 空闲时等待主线程提交新代次。运行时，sender 在 `processRequests()` 等待数据，generator 在 `enqueueRequest()` 等待队列空间。
+- 编辑或停止提交新代次后，队列立即丢弃旧帧，并唤醒两个 worker。已经取出的帧可能处于设备 I/O 中，停止等待该调用返回。
+- 与新代次不匹配的旧配置回写、首包确认和错误均不能发布到当前操作。
 
 ---
 
-## 6. 设备配置阶段（profileChanged → configuration）
+## 6. 设备配置阶段
 
-发生条件：
+启动、运行中的文件/采样率/缩放编辑和桥接载波设置都会提交配置。主线程通过 `getCurrentProfile()` 取得公共参数，填入 nominal SampleRate、持续触发、Sweep 触发动作和 Stream 模式，再交给 sender。
 
-- 属性编辑完成（IQScale/SampleRate/FileList 的 `editingFinished`）
-- 公共设备参数变化 `StreamingBussiness::onDeviceProfileChanged()`
-- 启动业务 `startBusiness()`
-
-Sender线程在 `StreamingBussiness::workerLoop()` 中检测 `m_profileChanged`：
-
-1) 从 `streamingDataGenerator->toProfile()` 获取 widgetProfile。
-2) `getCurrentProfile(&m_deviceProfile)` 获取公共设备 profile，并写入：
-  - `m_deviceProfile.sampleRate = widgetProfile.sampleRate`
-  - `m_deviceProfile.triggerCount = -1`
-  - `m_deviceProfile.mode = DEVICE_MODE_STREAM`
-3) 读取当前桥接过来的 `carrier plan`。
-4) 先调用：`m_operator.configuration(m_deviceProfile, &m_deviceProfile, &errorStr)`。
-5) 若当前是 `SweepStream(FScan/LScan)`，再调用 streaming sweep overlay。
-6) 发信号：`deviceConfigurationEnd(m_deviceProfile, errorStr)`。
-7) 重置统计：`m_dataDownLoaded=false`、`m_totalSendSamples=0` 等。
-
-备注：当前实现里，`fileList` 为空不再由 `StreamingBussiness` 内部额外配置 `Mute`；Panel 层会自动取消选中并重新仲裁。这里的配置阶段应理解为“active streaming session 的设备重配阶段”，而不是旧语义下的“空列表时内部保活 mute”。
+1. 先调用 `m_operator.configuration()` 配置 FixedStream。
+2. SweepStream 再叠加 FScan/LScan/MScan 配置。
+3. 当前代次在主线程发出 `deviceConfigurationEnd`。配置成功且文件列表有效时进入下发，逐次配置均重置进度统计。
+4. 清空文件列表时，Panel 取消使能，Core 走正常停流流程。在线重配仅处理非空列表。
 
 ---
 
@@ -238,11 +185,11 @@ Generator 内部常量：
   - `*2`：short 的字节数
 - 所以每一帧 `m_readLen = 8,000,000 bytes`。
 
-发送到设备时 points 的计算：
+发送线程从帧大小得到总点数：
 
-- `points = request.data.size() / 4`
+- `framePoints = request.data.size() / 4`
 - 解释：每个 complex sample = I(short,2B) + Q(short,2B) = 4B。
-- 因此每帧 points = 8,000,000 / 4 = 2,000,000 complex samples。
+- 普通生成帧含 2,000,000 个复数 IQ 点。短文件循环缓存按完整周期补齐，可能超过这个帧大小。
 
 ### 7.2 WAV 文件校验与数据段定位
 
@@ -264,7 +211,7 @@ Generator 内部常量：
 
 因此：
 
-- **单个 request.data 总是固定帧长（除非参数中断/停止）**。
+- 普通路径按固定帧长入队，短文件循环缓存沿用完整波形周期的重复块。
 - 多个文件会被视为一条连续流：尾部残片会与下一个文件头部拼接。
 
 ### 7.4 IQScale 处理
@@ -279,28 +226,18 @@ Generator 内部常量：
 
 ## 8. 数据消费：实时下发与进度统计
 
-### 8.1 消费/下发机制
+### 8.1 消费与首包
 
-- Sender线程循环调用 `streamingDataGenerator->processRequests()`。
-- 该函数内部最终会调用 `DataSender::processRequests()`：
-  - 队列为空则阻塞；
-  - 取出一个 `DeviceDataRequest` 后释放锁；
-  - 调用回调 `m_callback(request)`。
-- 回调由 `StreamingBussiness` 注册：
-  - `streamingDataGenerator->setProcessingCallback(std::bind(&StreamingBussiness::sendData,...))`
+- sender 调用 `processRequests(revision, callback)` 等待和取帧。队列锁在回调处理数据或文件错误前释放。
+- 每次 H2 发送最多 `min(2,000,000, floor(请求采样率 × 0.1 秒))` 个复数 IQ 点。发送端按偏移直接取原帧数据，末块按剩余点数下发。
+- 每块进入 SDK 前检查操作代次。改参或停止时丢弃旧帧剩余部分，已进入 SDK 的调用按现有顺序等待返回。
+- `m_operator.downloadDataRealTime()` 调用 H2 的 `tx_send_stream()`。返回 0 才算该块被接受，H2 正值仍经设备告警路径记录。
+- 首块被接受后发布运行状态，连续下发期间不会维持 pending。首块失败会报错并解除等待，发送失败后放弃本帧余量。
 
-### 8.2 `StreamingBussiness::sendData()` 的关键逻辑
+### 8.2 播放进度
 
-1) 若 `m_interrupt` 为 1，则直接返回（用于 stop/profileChanged 时的快速退出）。
-2) 调用 `m_operator.downloadDataRealTime((int16_t*)request.data.data(), request.data.size()/4, request.sampleRate)`。
-3) “首包不计入统计”：
-   - `m_dataDownLoaded == false && result==true` 时仅记录时间戳并 return。
-   - 之后的包才会累加 `m_totalSendSamples`。
-4) 每隔约 1s 计算播放进度：
-   - `totalSamples = m_widget->totalSamples()`（由 UI 统计的所有文件总 sample 数）
-   - `samples = m_totalSendSamples % totalSamples`
-   - `pos = samples / totalSamples * 100`
-   - `emit playbackPosChanged(pos)`
+- 以首个成功块的时间为起点，以采样率估算播放位置，每约 1 秒更新一次。总点数来自实际打开的数据源。
+- 时长不超过进度更新周期时显示 100%。较长的数据按总点数取模计算位置。
 
 ### 8.3 UI 进度显示
 
@@ -312,68 +249,23 @@ Generator 内部常量：
 
 ## 9. 启动/停止序列（时序梳理）
 
-### 9.1 初始化
+### 9.1 初始化和启动
 
-- Plugin 初始化创建属性并注册业务：`Core::BusinessManager::registerBusiness(new StreamingBussiness)`。
-- 构造 `StreamingBussiness`：
-  - 创建 UI `StreamingPanel`。
-  - 创建 `StreamingDataGenerator`（其内部立即启动 `m_workerThread`）。
-  - 创建并启动 `m_senderThread`（其 started 后 invoke `workerLoop()`）。
+- HTRA 插件注册 `StreamingBussiness`，构造时启动 sender 和 generator。两条线程在收到首个操作前等待。
+- Core 完成交接后调用 `startBusiness()`。主线程提交代次、发布 pending，sender 配置设备，generator 按同一代次产出首包。
 
-此时：
-- Sender线程在 `workerLoop()` 里由于 `m_enabled==false` 会阻塞在条件变量等待。
-- Generator线程在 `workerLoop()` 中也会等待 `m_profileChanged`（初始化后通常会很快被 `setEnabled()` 或 setter 触发）。
+### 9.2 停止
 
-### 9.2 startBusiness
-
-- `StreamingBussiness::startBusiness()`：
-  - `m_enabled=true; m_profileChanged=true; notify_one()` 唤醒 sender loop。
-  - `streamingDataGenerator->setEnabled(true)`：
-    - `m_enabled=true; m_profileChanged=true; notify_one()` 唤醒 generator loop。
-    - `DataSender::restartProcessing()` 开启队列运行。
-
-结果：
-- Sender线程先进入“配置设备阶段”，把设备切到 `Stream` 并按需要叠加 sweep overlay。
-- Generator线程开始读取文件并向队列生产数据；Sender线程阻塞消费并下发。
-
-### 9.3 stopBusiness
-
-- `StreamingBussiness::stopBusiness()`：
-  - `streamingDataGenerator->setEnabled(false)`：
-    - `DataSender::interruptProcessing()` 唤醒并清队列。
-  - `m_profileChanged=true; m_enabled=false`。
-  - busy-wait 等待 `m_interrupt` 变为 1（sender loop 退出内层发送循环后设置）。
-  - 清统计并 `emit playbackPosChanged(0)`。
-
-备注：stop 这里使用了忙等（`while (m_interrupt==0) continue;`），这会占用 CPU；但它的意图是确保 sender loop 已经跳出阻塞/下发状态。
+- `stopBusiness()` 提交空生成快照并清队列，等待 sender 用条件变量确认停止。Core 收到确认后可完成现有模式交接。
+- 停止确认后主线程结束 pending 并将 UI 进度归零。
 
 ---
 
-## 10. 参数变化（profileChanged）的传播路径
+## 10. 参数变化的传播路径
 
-### 10.1 UI 修改参数
-
-- IQScale/SampleRate：用户编辑完成触发 `Property::editingFinished`。
-- FileList：Load/Unload/Remove/拖拽后 UI 主动 `emit fileListProperty->editingFinished()`。
-
-### 10.2 Business 响应
-
-- 对应 `editingFinished` 回调：
-  - 设置 `StreamingBussiness::m_profileChanged=true`（用于 sender loop 重配设备）。
-  - 调用 Generator 的 setter（触发 Generator 侧 `interrupt()`）。
-
-### 10.3 Generator 响应
-
-- setter：更新内部值 → `emit *Changed()` → 若 enabled 且非 resetting → `interrupt()`。
-- `interrupt()`：
-  - `m_profileChanged=true; notify_one()` 唤醒生成线程；
-  - `DataSender::interruptProcessing()` 立即唤醒并让消费者线程从阻塞中退出。
-
-### 10.4 Sender 响应
-
-- sender loop 的内层循环条件是 `while (!m_profileChanged && m_enabled)`。
-- 一旦 `m_profileChanged=true`：
-  - sender loop 跳出“下发循环”，回到外层进行设备重配置。
+- GUI 和 SCPI/Minibar 在线编辑共用业务端字段更新。运行中编辑立即提交新代次。配置恢复和 Preset 先停业务，再按正常生命周期重新应用。
+- 公共设备参数和桥接载波变化使用同样的代次机制。生成线程重新打开新文件列表，发送线程按快照完成配置并开始发送。
+- 清队列不会撤回已经进入设备 I/O 的帧。旧代次结束后，只有新代次的结果能解除当前操作屏障。
 
 ---
 
@@ -381,10 +273,8 @@ Generator 内部常量：
 
 ### 11.1 进入 Streaming 模式后清空文件列表
 
-- 当前实现里，`fileList` 清空后，Panel 层会自动失能并取消选中；
-- `FancyTabWidget` 随后重新仲裁，streaming business 不再依赖内部 `Mute` 兜底继续维持 active；
-- generator 看到 `currentFileList.isEmpty()` 时不会继续产数；
-- sender 若仍在等待队列，会被 interrupt / re-arbitration 路径唤醒并退出当前运行态。
+- 清空列表和移除最后一项都由 Panel 取消使能。Core 登记刷新，并在重新仲裁时执行 `stopBusiness()`。
+- 业务保存空列表。停流操作更新队列代次、清队列并等待 sender 确认。
 
 当用户随后重新 Load 文件并重新进入 streaming：
 - UI 更新 `fileList` 并重新满足 enable 前提；
@@ -395,8 +285,8 @@ Generator 内部常量：
 ### 11.2 播放中拖拽排序/移除文件
 
 - UI 在最终列表确实改变时更新 property 并发 `editingFinished`。
-- business 标记 profileChanged 并更新 generator。
-- generator interrupt → 清空队列、停止当前生成循环 → 重新按新 fileList 生成。
+- business 保存新文件顺序并提交新代次。
+- 队列立即丢弃上一代的软件帧。generator 从新快照生成，sender 丢弃上一代待发送的数据。
 - sender 重配设备（仍是 STREAM，但会重置统计）。
 - 重排后 `openStreamSources(currentFileList)` 按新列表顺序建立数据源，普通逐帧路径和小文件 replay cache 都使用新建的 `StreamCursor`，因此从新列表第一个有效文件的起点重新生成并循环下发。该行为不是保留原文件播放位置的热重排；软件队列清空也不代表已进入设备的帧在拖放瞬间撤回。此处为静态链路核对，GUI/设备切换时序仍待运行验收。
 
@@ -404,18 +294,11 @@ Generator 内部常量：
 
 ## 12. 当前实现的边界与注意点（如需排查问题时重点关注）
 
-### 12.1 低采样率下的固定帧时长与设备反压
+### 12.1 低采样率下的发送块与设备反压
 
-当前 Streaming 每帧固定为 **8,000,000 bytes / 2,000,000 complex samples**。这意味着同一帧在不同采样率下代表的实时播放时长差异很大：
+原先在 195.3125 kSa/s 下，一次提交 2,000,000 点相当于 10.24 秒播放量。设备缓冲满时，发送可能等到设备腾出一块空间。现在发送端按目标 100 ms 分块。同一采样率下一次最多提交 19,531 点，1 MSa/s 时最多提交 100,000 点，20 MSa/s 起最多提交 2,000,000 点。
 
-- 62.5 Msps：约 32 ms / 帧
-- 2.5 Msps：约 800 ms / 帧
-- 1 Msps：约 2 s / 帧
-- 195.3125 ksps：约 10.24 s / 帧
-
-因此，低采样率下 `tx_send_stream()` 的单次调用可能表现为明显更慢，这不一定表示 API 错误。更合理的模型是：`tx_send_stream()` 可能受设备端 FIFO / stream buffer 反压影响；当设备内部缓存空间不足时，连续下发会等待设备消耗前面的 IQ 数据。
-
-调试时要特别注意断点对结论的影响：如果线程在断点处暂停，设备端可能已经继续消耗完前面送入的 IQ，恢复后下一次 `tx_send_stream()` 会因为 FIFO 变空而快速返回。这种“断点后很快”不能证明连续运行时 API 没有反压。
+100 ms 表示每块覆盖的播放时长。SDK 调用耗时还取决于设备释放缓冲的粒度、是否正在消费及传输状态。已经进入设备缓冲的数据由设备侧配置行为处理。满缓冲下的实际调用耗时和切换后旧 IQ 输出仍待实机验收。[实施记录](../TaskLog/2026-11-24_streaming-adaptive-send-blocks.md)
 
 ### 12.2 Streaming 状态轮询与设备锁冲突
 
@@ -439,9 +322,9 @@ Generator 内部常量：
 
 ---
 
-## 13. 近期已完成工作（Correctness/并发语义）
+## 13. 历史记录（旧调度机制的并发修复）
 
-这一部分用于记录本次评审中已经落地的改动，避免后续回归时“重复踩坑”。这些改动主要是并发语义与中断行为的收敛，不改变 Streaming 的业务功能目标。
+本节保存旧调度机制的并发修复记录。2026-11-24 起，清队列、唤醒双线程和结果归属统一由操作代次管理。
 
 ### 13.1 已落地改动点
 

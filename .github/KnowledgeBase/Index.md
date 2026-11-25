@@ -41,7 +41,7 @@ Get-Content -Encoding UTF8 -LiteralPath "$kb\listmode_scpi调试指南.md" | Sel
 - [单通道 H2 信号流 Home 设计依据](h2_single_channel_signal_flow_home_rationale.md)：仅依据当前 h2_api.h；USG 风格基带/调制/射频分工与状态证据边界，尚未实施。
 - [UI 无关运行时与迁移史](ui_independent_runtime_and_minibar_design.md)：CoreRuntimeServices / DeviceRuntimeBridge；旧 in-process 部分为历史。
 - [Provider ownership](analog_htra_provider_lifecycle_and_duplicate_panel_guard.md)：Analog / HTRA 调制归属与已删除的重复 panel 防护。
-- [Streaming 数据流](streaming_dataflow.md)：legacy 双线程、队列、中断与重启；文件列表整行拖放及按新顺序从头下发，静态核对待运行验收。
+- [Streaming 数据流](streaming_dataflow.md)：双线程、队列、100 ms 发送分块；文件列表整行拖放及按新顺序从头下发，静态核对待运行验收。
 - [Streaming 桥接与双通道方案](streaming_bridge_rearm_reboot_refactor_plan.md)：session / endpoint / rearm / reboot / quiesce。
 - [GNSS 接入](gnss_plugin_integration_summary.md)：菜单、配置、实时状态与 Streaming 禁配；XPPS 始终可选，输出关闭或失锁时保留触发源并显示告警，Sweep Single 逐脉冲整轮及等待节拍确认。
 - [插件加载](plugin_metadata_and_loading_architecture.md)：metadata / JSON 依赖 / PluginManager 顺序。
@@ -89,11 +89,11 @@ Get-Content -Encoding UTF8 -LiteralPath "$kb\listmode_scpi调试指南.md" | Sel
 ## D-waveform
 - [多音 RMS/Level 人工测试](multitone_rms_level_test_plan.md)：Fixed 3/5/9 音理论值、归一化与 3 dB 参考、默认 RMS/手改 Level/扫描场景及仪器验证；方案未执行。
 - [AWG CSV 通用契约 1.0 与实现边界](arb_ai_exchange_template_and_preview_design.md)：链接唯一通用 Markdown；Save CSV 仅非 Arb 模式提供，Arb 移除 Save 占位并上移参数；17 项元数据、不保存选区，范围由用户消息描述。AI 交换固定 50 Ω/Linear，程序历史导入兼容性见正文；摘要只读；预览含 overview/局部查看范围、双击创建/拖动样点游标及标准时间按钮，Start 编辑固定右端并联动 Span、满量程可编辑；连续缩略图与分层极值缓存。format_version=1，等待测试，未接入打包分发。
-- [Arb 编辑需求与最小分段表设计](arb_editor_requirements_and_segment_table_design.md)：模板/快速库入口与 A/B/C/D/E 单路任务、Hold/Ramp/Data、按任务划分重采样边界及线性边沿语义；[交互简版](arb_editor_minimum_model_and_user_interaction.md)：保留原 A/B/D/E/F 编号的五类操作说明；均为尚未实施方案。
 - [TrueArb 硬件契约与七类波形算法](awg_truearb_waveform_algorithms_and_arb_editing.md)：C0 设备契约与算法；Amplitude、DC Offset、HighZ/50 Ω/Custom 负载含义及 CSV 导出恢复、预期播放电压；含 Pulse 参数联动与 DC 参数收敛（已实现、静态核对）、Noise 参数与算法调研（维持现状）、B0 对比与厂商调研。
 - [Digital 交互入口](digital_modulation_user_interaction_flow.md)：SPS、异步生成、截断、Instrument 截断选项触控尺寸与 SVG 留白、reset；2026-11-11 Save IQ 确认/选路径/预检后释放缓存、后台完整导出与真实写盘进度（静态实施，待运行验收）。
 - [从反汇编重写 DSSS 与 OFDM 基带生成算法](dsss_ofdm_waveform_algorithms.md)：由 ELF 指令推导 PN 位序、RRC 成形、基 2 IFFT、窗口交叠及 IQ16 量化，逐段对应 C++17 重写与中间对照值。
 - [H2 Digital/DSSS/OFDM 临时版迁移](h2_digital_dsss_ofdm_temporary_migration.md)：Windows x64 / 125 MS/s、设备授权替代 FixedLic、MSK 字段联动、长度拒绝与完整 Save IQ、会话及 IQ 所有权（方案，未实施）。
+- [十类生成型基带统一使用 H2 Mod](h2_mod_baseband_generation_design.md)涵盖七类免授权、三类设备授权、离线生成与高带宽合同、IQ 所有权、删改批次及验收（设计待实施）。
 - [Multitone 算法入口](htra_multitone_current_algorithm_and_vsg60_boundaries.md)：tone / notch / phase / AutoScale / 精确周期约简 / preview；中心音遮盖固定为内部 true 常量，不对外开放、不存 JSON，Preset/旧 false 文件不能关闭（静态实施，待验收）；Fixed 与 Playback F/L/MScan 的 LO 频率补偿（下发加偏移、回写减偏移，切换 CW/奇数音不残留）；Main/Minibar Count 2..1024 与一致的表格处理规则，两端 1024 音改单音已用户实测通过。
 - [Multitone 与 VSG60 对比](multitone_vsg60_three_case_comparison_and_playback_consistency.md)：三组样本与 Playback 一致性。
 - [iqtone.m 借鉴候选](htra_multitone_iqtone_reuse_candidates.md)：历史参考、后续优化建议。
@@ -108,7 +108,7 @@ Get-Content -Encoding UTF8 -LiteralPath "$kb\listmode_scpi调试指南.md" | Sel
 
 ## E-scpi
 
-- [入口：SCPI 接入审阅与方案](scpi_review_and_integration_plan.md)：TX/UI 回写、错误语义、ScpiIntentService 迁移；LOAD/SAVE、images 截图、JSON 相对资源路径与 RMS/basic-only；幅度补偿 CORR **9 类功能、13 入口使用说明**：长短写、参数/响应、dB、草稿提交、逻辑名称、VAL?、ASCII/REAL64 示例与错误码。旧版测试 7/7 组通过，当前精简为 3 组；GUI/Reset/扫描/射频待验收。
+- [入口：SCPI 接入审阅与方案](scpi_review_and_integration_plan.md)：2026-11-24，`*OPC?` / `*WAI` 已接入 Core TX 完成判定，`*OPC` 通过 `*ESR?` 报告完成，已覆盖 Streaming 首包和停止，错误可经 `SYST:ERR?` 查询。涵盖 UI 依赖、端口与监听、参数范围、分阶段改进方案、LOAD/SAVE 和截图、幅度补偿 CORR 的 9 类功能及 13 个入口。
 - [信号损伤 SCPI 接口设计](signal_impairments_scpi_design.md)涵盖已接入的 `IQ:AWGN`、I/Q、Freq/Clock 12 对设置与查询、单位校验、带宽请求和 T4 配置回归。设备验收待执行。
 - [ListMode 命令调试入口](listmode_scpi调试指南.md)：TCP 5025、命令表、驻留判据、STEP/Hop 与 RESET 边界；1 GHz/500 MHz span、历史 R&S 实测流程。
 - [ListMode 接口设计](listmode接口实现.md)：含 GUI MScan 与 SCPI 共用的 Draft/Submitted/Applied、数据 Apply 与设备执行分离、Last State 恢复后的 Apply 状态同步、Enabled 按钮门控、真实执行与兼容映射边界。
@@ -144,7 +144,7 @@ Get-Content -Encoding UTF8 -LiteralPath "$kb\listmode_scpi调试指南.md" | Sel
 - [High DPI 入口](high_dpi_development_practices.md)：Qt5 缩放、资源倍率、多屏拖动。
 - [多屏 popup 几何](multiscreen_popup_geometry_and_screen_topology.md)：屏幕断开、DPI、EnumTextButton / ComboBox / QMenu。
 - [Frameless 白边排障](frameless_multimon_dpi_white_border_issue.md)：多屏与高 DPI。
-- [设备状态 UI 反馈](device_status_ui_feedback.md)：error / warning 去重、15–19 失锁滚动文案与状态生命周期、同码 RLO 轮播联动及 Minibar 例外；已移除状态未更新后缀/tooltip，内部确认状态保留。
+- [设备状态 UI 反馈](device_status_ui_feedback.md)：error / warning 去重、15–19 失锁滚动文案与状态生命周期、Streaming +10 停流确认后清除、同码 RLO 轮播联动及 Minibar 例外；已移除状态未更新后缀/tooltip，内部确认状态保留。
 - [MessageDialog](messagedialog_design.md)：交互、hosted 层级与提示边界；正文统一左右 20 px，移除短文本左偏移（静态修改，待树莓派验收）。
 - [NotificationPopup](controls_notification_popup.md)：非模态通知、动画、定位与自动关闭。
 - [Wayland 无边框弹窗](WAYLAND_FRAMELESS_OVERLAY_PATTERN.md)：overlay 与遮罩模式、List Mode 数字键盘与全局外部点击边界。

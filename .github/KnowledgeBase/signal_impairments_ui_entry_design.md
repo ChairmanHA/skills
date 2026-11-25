@@ -2,9 +2,32 @@
 
 日期：2026-11-04；2026-11-10 修订。状态：UI、Amplitude Compensation（原 User Flatness）与 Freq/Clock 的设备 API 链路已静态实施，未构建或运行验收；AWGN/IQ 的前端 IQ 处理已于 2026-11-10 静态接入。
 
+2026-11-18 右侧入口（静态实施）：信号损伤排在 FancyTabWidget 基带列表末项，随列表切换单列或双列。选中态复用列表配色。任一损伤组使能时，入口使用亮青蓝 `#00B0F0` 和深色字 `#102A1D`，以区分基带的使能配色。点击进入损伤页，损伤与基带各自保持使能状态。见 [入口恢复](../TaskLog/2026-11-18_signal-impairments-list-green.md)和[颜色调整](../TaskLog/2026-11-18_signal-impairments-enabled-cyan.md)。
+
+2026-11-18 页内布局（静态实施）：I/Q、AWGN Noise、Freq/Clock 自上而下各占内容区全宽，组内控件参照数字波形页使用两列等权网格。见 [TaskLog](../TaskLog/2026-11-18_signal-impairments-layout-list-order.md)。
+
+2026-11-20 状态反馈（静态实施）：I/Q 和 AWGN Noise 仅在组开启且状态为 NotApplied 或 Failed 时显示提示。Processing、Idle 和 Applied 时清空文本。I/Q 底行和 AWGN Noise 开关右侧的提示区域始终占一行，行高按当前字体计算。长提示按实际列宽显示省略号，悬停可查看完整原文。见 [移除处理中提示](../TaskLog/2026-11-20_remove-impairments-processing-label.md)和[稳定提示布局](../TaskLog/2026-11-20_stabilize-impairments-status-layout.md)。
+
+2026-11-20 偏置与提示（静态实施）：I Offset 和 Q Offset 的输入范围为 `±20 %FS`。旧配置仍接受原合法范围，恢复值夹紧到新范围。未应用、AWGN 零信号和缓冲区错误继续反馈。DSP 输入校验失守时显示简短失败提示，具体原因写日志。取消的计算结果沿用现有丢弃规则。六套翻译目录同步删除旧提示。见 [TaskLog](../TaskLog/2026-11-20_refine-impairment-offset-and-feedback.md)。
+
+2026-11-17 入口迁移与反馈修订（历史）：
+
+- 信号损伤入口从 CommonPanel 移到 FancyTabWidget 列表首项，标题 `Signal Impairments`。列表重建后仍在所有基带业务之前；复用原 delegate 的选中和使能颜色。点击仅导航，不选择/取消基带业务，不触发 Auto Mod。使能色由三组开关 OR 派生，配置恢复、Reset 和页面切换沿用原语义。
+- CommonPanel 删除 Impair 按钮、聚合状态刷新和旧导航接口，保留四个模式按钮，Wide 舒适宽度恢复 956 px。
+- 分组标题固定为 `AWGN Noise`、`I/Q`、`Freq/Clock`。AWGN 状态在 Enabled 右侧，I/Q 状态在组内底行跨两格；纯文本 QLabel 可换行、水平 QSizePolicy::Ignored，因此完整错误不参与列宽要求。Idle/Applied 或对应组关闭时清空状态，保留 Processing / Not applied / Error 全文反馈。无需改写状态语义。
+- 六品牌 Language.xlsx 各追加 20 个缺失键（13 个页面/导航/状态词条及 7 个处理错误）；既有 Bandwidth、Enabled、Frequency Error、SampleRate Error 等不改。保留各品牌语言列、隐藏标记及备注结构，中性英文版不扩充其隐藏俄文列。术语采用增益不平衡、正交相位误差、I/Q 直流偏置；参考 [Keysight I/Q 定义](https://helpfiles.keysight.com/csg/n7622/Content/Main/I_Q.htm) 和 [MathWorks AWGN / SNR](https://ww2.mathworks.cn/help/comm/ref/awgn.html)。
+
+本段覆盖下文历史 CommonPanel 入口和标题拼接记录。第九节的布局问题已按本段实施，未采用此前跨全页提示的设计；其他未明确实施的设想仍只是方案。TaskLog：[本轮实现与静态核对](../TaskLog/2026-11-17_signal-impairments-ui-navigation-translations.md)。
+
+2026-11-17 功率设置修订：删除全局 Level Offset 全部代码及 OFST；AMPC 更名 UCOR，UNLEVEL 优先。常量校正通过两个不同频点设置相同补偿量实现。旧配置的 LevelOffset 自然忽略。早期隐藏入口记录不代表当前仍保留该功能，当前边界见第四节。
+
+2026-11-13 状态反馈优化设计：用户实测长错误标题造成左右列宽不一致，暗色主题中部分说明不可读。第九节给出待实施方案：固定组标题，状态全文移至跨两列、可换行的提示区；区分纯 AWGN 业务的“不适用”和 Bn>Fs 的“处理失败”，说明复数噪声带宽限制及十音示例。本轮只输出设计，尚未修改产品代码或运行验收。
+
+2026-11-17 AWGN 文案与范围：按钮改名为 `AWGN SNR`、`AWGN Bandwidth`。带宽键盘范围随当前 Playback 采样率变化，并做双向钳位（定义见[损伤方案](signal_impairments_p0_interaction_design.md)），无额外提示。下文 3.3 的“SNR 与 Noise Bandwidth”即这两个参数。
+
 2026-11-10 入口恢复：CommonPanel Impair 按钮重新加入按钮行并显示，Wide 舒适宽度按五个按钮恢复为 1061 px；下文 2.1/2.3 的“隐藏”“956 px”为历史状态。AWGN、I/Q 组开启时，组标题按处理状态附加 `(Processing)`、`(Not applied)` 或 `(Error: …)`，生效和关闭时不加后缀。实现见 [TaskLog](../TaskLog/2026-11-10_awgn-iq-frontend-processing.md)。实现划分见 [信号损伤方案：AWGN 与 I/Q 损伤在前端 IQ 层实现](signal_impairments_p0_interaction_design.md)（2026-11-10 起 AWGN/IQ 由前端 IQ 层实现，不再等待 FPGA），本文定义 UI 入口、页面结构、状态语义和交互规则。
 
-2026-11-09 可见性修订：User Flatness 的 UI 显示名统一为 Amplitude Compensation，包括开关、表格入口、Editor、CSV 导入导出窗口及默认导出名。全局 Level Offset 编辑入口暂时隐藏，保留参考面换算、保存/恢复/Reset、SCPI 和 OFST 行为；不清零已有值。当时将 Impairments 页的 I/Q、AWGN 暂时隐藏，等待设备 API，只显示顶部跨两列的 Freq/Clock；同日后续已按用户要求恢复三组布局（见下文）。隐藏期间未删除控件、绑定或参数，也未改变现有三组 OR 聚合状态；翻译文件由用户更新。实现见 [TaskLog](../TaskLog/2026-11-09_amplitude-compensation-ui-visibility.md)。下文保留的三组参数与 Level Offset 语义仍是底层合同。
+2026-11-09 可见性修订：User Flatness 的 UI 显示名统一为 Amplitude Compensation，包括开关、表格入口、Editor、CSV 导入导出窗口及默认导出名。全局 Level Offset 编辑入口暂时隐藏，保留参考面换算、保存/恢复/Reset、SCPI 和 OFST 行为；不清零已有值。当时将 Impairments 页的 I/Q、AWGN 暂时隐藏，等待设备 API，只显示顶部跨两列的 Freq/Clock；同日后续已按用户要求恢复三组布局（见下文）。隐藏期间未删除控件、绑定或参数，也未改变现有三组 OR 聚合状态；翻译文件由用户更新。实现见 [TaskLog](../TaskLog/2026-11-09_amplitude-compensation-ui-visibility.md)。三组参数继续保留，Level Offset 合同已于 2026-11-17 删除。
 
 2026-11-04 修订：Level Offset / User Flatness 移出 Impairments 页，改到 Settings 的 RF Hardware，不属于损伤分组；修改 Offset 时保持 RF 端口输出、只改显示；Frequency Offset 更名为 Frequency Error，只做 Hz；AWGN 首版只提供 SNR 与带宽；CommonPanel Level/RMS 语义不变。
 
@@ -14,13 +37,13 @@
 
 2026-11-09 Minibar 清理：按用户要求删除 Minibar 的 Impair 按钮、聚合状态缓存/刷新、main 订阅和损伤 IPC 字段；Minibar 不展示或编辑损伤。Main 内部页面和参数保留，CommonPanel 按钮由用户移出布局。本次不新增切入 Minibar 时清零/关闭损伤的行为。见 [TaskLog](../TaskLog/2026-11-09_remove-minibar-impairments.md)。
 
-当前样式：I/Q 位于左列跨两行，AWGN 位于右上，Freq/Clock 位于右下，三组同时显示。不显示总开关或 General GroupBox。分组内部两列，开关和参数均为单格宽度。分组区域外层边距/组间距 10 px，组内边距 (8,12,8,8)、间距 8 px，按钮高 55 px；12 份主题复用设备设置页的边框、标题、按钮与 Invert 状态声明。
+当前样式：I/Q、AWGN Noise、Freq/Clock 依次纵排，各自铺满滚动内容区。分组内部两列，开关和参数均为单格宽度。外层边距为 (10,0,6,10)，组间距 10 px；组内边距 (8,12,8,8)，控件间隔 5 px，按钮高 55 px。
 
 2026-11-05 最终交互修订：用户推翻 CommonPanel 总开关提议，彻底删除总开关。CommonPanel 上方标题为 Impair，下方值标签为 ON/OFF，状态由 AWGN/IQ/Freq-Clock 三组 State 的逻辑 OR 派生；单击仍只导航。Minibar 改为只读聚合状态。Invert 保留 ON 值，但 I/Q 关闭时恢复普通外观；I/Q Offset 单位明确为 %FS。Freq/Clock 组内两项的不同适用条件见 3.5。
 
-实施边界：`CoreRuntimeServices` 创建 `SignalImpairmentsSettings` UI owner 和独立的 `PowerReferencePlane` 输出参考面 owner（Level Offset + User Flatness）；损伤 Property 不加入设备 Profile 的 ExternalPropertyMapping；Freq/Clock 的有效值经 `TxCommonSettings.frequencyClockErrors` 快照进入 TX 请求，AWGN/IQ 仍仅保存 UI 参数。`CommonDeviceProfile` 聚合保存/恢复/Reset：损伤 UI 参数保存在可选的 `common.SignalImpairmentsUi`；Level Offset 保存在 `common.LevelOffset`（属性 ID `LevelOffset`，缺失时恢复 0）；User Flatness 保存在 `common.UserFlatness = {Enabled, Table, File}`，草稿不持久化；加载事务开始前分别由两个 owner 校验。用户确认 d10531bc 引入的嵌套格式未发布，因此不保留该格式的迁移分支。新增 `SignalImpairmentsPanel` standalone page 和 `FlatnessTableDialog`，后者复用 Controls::Dialog、WaylandDialogMoveTool、数字键盘及 CSV 文件选择。主窗口文本/键盘通过 `ReferencedPower` 换算，SCPI 在外部数值协议边界换算，Minibar 由 Core 侧 `RemoteMinibarService` 在 IPC 出入口换算（helper 只收发用户参考面值，Offset 变化时递增 Sweep revision）；MScan 草稿/已提交数据、原有 CSV、profile 与设备链路继续存 RF 端口电平。User Flatness 已提交表与开关经 `TxCommonSettings.userFlatness` → `IDevice::Profile` 由 `FancyDevice::applyCommonDeviceSettingsLocked` 调用 `channel_config_amplitude_compensation` 下发（见 [TaskLog](../TaskLog/2026-11-05_user-flatness-api.md)，正负号与生效时机待 API 方确认）。Preset 保留已提交 Flatness 表并丢弃未应用草稿、关闭 Flatness。Minibar 不包含损伤显示、状态同步或编辑，损伤参数保留在主进程 owner。Freq/Clock 已接入设备，AWGN/IQ 尚未接入；只做静态核查。
+实施边界：`CoreRuntimeServices` 创建 `SignalImpairmentsSettings` UI owner 和独立的 `PowerReferencePlane` 幅度补偿 owner（User Flatness）；损伤 Property 不加入设备 Profile 的 ExternalPropertyMapping；Freq/Clock 的有效值经 `TxCommonSettings.frequencyClockErrors` 快照进入 TX 请求，AWGN/IQ 仍仅保存 UI 参数。`CommonDeviceProfile` 聚合保存/恢复/Reset：损伤 UI 参数保存在可选的 `common.SignalImpairmentsUi`；User Flatness 保存在 `common.UserFlatness = {Enabled, Table, File}`，草稿不持久化；加载事务开始前分别由两个 owner 校验。用户确认 d10531bc 引入的嵌套格式未发布，因此不保留该格式的迁移分支。新增 `SignalImpairmentsPanel` standalone page 和 `FlatnessTableDialog`，后者复用 Controls::Dialog、WaylandDialogMoveTool、数字键盘及 CSV 文件选择。主窗口文本/键盘统一用普通 Power，SCPI 与 Minibar 直接收发功率数值，无全局加减；MScan 草稿/已提交数据、CSV、profile 和设备请求保持原数值口径。User Flatness 已提交表与开关经 `TxCommonSettings.userFlatness` → `IDevice::Profile` 由 `FancyDevice::applyCommonDeviceSettingsLocked` 调用 `channel_config_amplitude_compensation` 下发（见 [TaskLog](../TaskLog/2026-11-05_user-flatness-api.md)，正负号与生效时机待 API 方确认）。Preset 保留已提交 Flatness 表并丢弃未应用草稿、关闭 Flatness。Minibar 不包含损伤显示、状态同步或编辑，损伤参数保留在主进程 owner。Freq/Clock 已接入设备，AWGN/IQ 尚未接入；只做静态核查。
 
-当前 UI 测试范围集中定义在 `signalimpairmentssettings.cpp`，不是仪器规格：SNR ±100 dB、Noise Bandwidth 1 Hz–1 GHz、Gain Imbalance ±20 dB、Skew ±180°、I/Q Offset ±100%、Frequency Error ±1 GHz、Sample Rate Error 临时 ±100000 ppm（2026-11-09 为测试从 ±1000 扩大，±10%）；Flatness 2–999 点、频率 (0, 100 GHz]、校正 ±100 dB。Level Offset ±100 dB 由 `powerreferenceplane.cpp` 定义。Flatness 行数按用户明确要求为 `2 <= rows < 1000`，唯一上限定义在 `PowerReferencePlane::MaximumFlatnessPoints`；频率/校正范围仍为 UI 测试限制，API 头文件未给出完整规格。CommonPanel 的 Impair 入口已隐藏，Wide 舒适宽度按实际三数值框、四个可见按钮、间距和边距合计 956 px，较窄时使用 Compact；1024×600、Windows 最小窗口及 Wayland 触摸布局仍待运行验收。
+软件参数范围集中定义在 `signalimpairmentssettings.cpp`。SNR ±100 dB、Noise Bandwidth 请求 1 Hz–1 GHz、Gain Imbalance ±20 dB、Skew ±180°、I/Q Offset ±20 %FS、Frequency Error ±1 GHz、Sample Rate Error 临时 ±100000 ppm（2026-11-09 为测试从 ±1000 扩大到 ±10%）。Flatness 2–999 点、频率 (0, 100 GHz]、校正 ±100 dB。Flatness 行数按用户明确要求为 `2 <= rows < 1000`，唯一上限定义在 `PowerReferencePlane::MaximumFlatnessPoints`。频率与校正范围仍为 UI 测试限制，API 头文件未给出完整规格。CommonPanel 的 Impair 入口已隐藏，Wide 舒适宽度按实际三数值框、四个可见按钮、间距和边距合计 956 px，较窄时使用 Compact。1024×600、Windows 最小窗口及 Wayland 触摸布局仍待运行验收。
 
 ## 一、范围
 
@@ -30,15 +53,14 @@
 | Invert、I/Q 幅度失衡、相位失衡、I/Q Offset | Impairments 页 | 前端 IQ 层（2026-11-10 起；处理未接入） | I/Q |
 | Frequency Error（Hz） | Impairments 页 | 已有 API：下发 `fc + Δf` | Freq/Clock |
 | Sample Rate Error（ppm） | Impairments 页 | 已有 API：`Fs·(1+ε)` | Freq/Clock |
-| Level Offset | Settings → RF Hardware（入口暂时隐藏） | 显示/输入边界换算；设备 API 保持端口值 | 参考面校正，非损伤 |
-| Amplitude Compensation | Settings → RF Hardware | 已有 API `channel_config_amplitude_compensation` | 参考面校正，非损伤 |
+| Amplitude Compensation | Settings → Amplitude Compensation | 已有 API `channel_config_amplitude_compensation` | 参考面校正，非损伤 |
 | Phase Noise、静态多径、Timebase Offset、频偏 ppm 模式、AWGN 噪声参考 | 不提供 | — | 不显示 |
 
-**当前只开放 Freq/Clock 与 Amplitude Compensation 的 UI。** AWGN/IQ 等待前端 IQ 处理接入（2026-11-10 起不再等待 API），Level Offset 等待后续重构决定；本轮仅调整可见性，不删除背后的逻辑，页面不显示“UI 模拟”说明。
+**2026-11-09 历史可见性记录：** 当时只开放 Freq/Clock 与 Amplitude Compensation 的 UI，其他损伤页面仅调整可见性、不删除底层逻辑。2026-11-17 起 Level Offset 则已完整删除，不属于隐藏功能。
 
-划分依据：损伤是有意劣化信号，由各组独立开关管理；Level Offset / Flatness 是输出参考面与路径校正，不随损伤组开关变化。Keysight 把 Amptd Offset、Flatness 放在 Amplitude 菜单，与 I/Q 损伤、AWGN 分开，本方案保持这一分工。
+划分依据：损伤是有意劣化信号，由各组独立开关管理；Amplitude Compensation 是输出路径校正，不随损伤组开关变化。Keysight 把 Amptd Offset、Flatness 放在 Amplitude 菜单，与 I/Q 损伤、AWGN 分开，本方案保持这一分工。
 
-## 二、入口：CommonPanel Impair 按钮（当前隐藏）
+## 二、历史入口：CommonPanel Impair 按钮（现已删除）
 
 ### 2.1 位置与外观
 
@@ -55,7 +77,7 @@ flowchart LR
         subgraph ValueRow["数值行"]
             direction LR
             F["Frequency<br/>1.000 000 000 GHz"]
-            L["Level  [UNLEVEL / OFST / AMPC]<br/>-30.00 dBm"]
+            L["Level  [UNLEVEL / UCOR]<br/>-30.00 dBm"]
             R["RMS<br/>-33.01 dBm"]
         end
         subgraph ButtonRow["模式按钮行（右对齐）"]
@@ -88,19 +110,20 @@ flowchart LR
 
 ### 3.1 结构：单页同时显示三组
 
-- 作为 standalone page 挂入 `FancyTabWidget`，`MainWindow::showImpairmentsPage()` 与 Sweep 页同模式；同步 pageHighlighted 与窗口标题。
+- 作为独立配置页挂入 `FancyTabWidget`，从右侧基带列表末项进入，同步按钮选中态和窗口标题。
 - 不提供总 Enabled；I/Q、AWGN、Freq/Clock 三个 GroupBox 同时显示，保留各自控件和绑定。
-- I/Q 位于左列跨两行，AWGN 位于右上，Freq/Clock 位于右下；不提供 Category 或 stacked 子页。
+- I/Q、AWGN Noise、Freq/Clock 依次纵向排列，每个分组横向铺满内容区。
 - 分组标题使用组名，各组内部使用一个简单 ON/OFF `SwitchButton`，文字统一为 `Enabled`。开关、Invert 和参数均占一个普通单格；I/Q 的开关与 Invert 同行。
-- 每组内两列等权。分组区域外层边距 10 px、组间距 10 px；组内边距 (8,12,8,8)、按钮间距 8 px，与设备设置页一致。组内按钮复用 55 px 高度规则，组开关使用已有 compactMode 适应单格宽度。
+- 每组内两列等权，控件横向扩展，列间距与数字波形页一致。组内按钮复用 55 px 高度规则，组开关使用 compactMode。
 - 深浅主题的 GroupBox 边框/标题、按钮高度与字色、Invert 的 checked/子 label 样式直接复用设备设置页对应 QSS 声明，不额外维护另一套数值或颜色。
 - 删除全页摘要、Actual RF、Actual Sample Rate 及其刷新用的 provider/名义值订阅。保留滚动容器以适应更小窗口和字体变化；1024×600 的实际显示仍待运行验收。
 - 数值输入复用现有虚拟键盘与 PropertySystem 绑定，单位使用 Hz/kHz/MHz、dB、°、%FS、ppm。
 
-| 行 | 左侧 | 右侧 |
+| 分组（自上而下） | 左列（自上而下） | 右列（自上而下） |
 | --- | --- | --- |
-| 分组上部 | I/Q（跨两行）：Enabled / Invert；Gain Imbalance / Quadrature Skew；I Offset / Q Offset | AWGN：Enabled / 空位；SNR / Noise Bandwidth |
-| 分组下部 | I/Q 延续 | Freq/Clock：Enabled / 空位；Frequency Error / SampleRate Error |
+| I/Q | Enabled、Gain Imbalance、I Offset | Invert、Quadrature Skew、Q Offset |
+| AWGN Noise | Enabled、SNR | 处理状态、Bandwidth |
+| Freq/Clock | Enabled、Frequency Error | 空位、SampleRate Error |
 
 本轮移除损伤功能新增的 tooltip 与常驻 UI simulation/说明小字，定义与适用条件先保存在代码注释和本文中。后续向用户提示的方式另行设计；Flatness 草稿/提交状态、校验和操作失败仍有反馈。
 
@@ -139,61 +162,35 @@ flowchart LR
 - 驻留 Playback 的 FFM-only 路径把频率误差视为 FFM 变化；采样率误差变化必须重新配置 stream 并启动输出，但可复用已驻留 IQ。Streaming 通过已有 bridge 在互斥锁下传递误差值快照，worker 不读 UI owner。保存/恢复/Reset 沿用 `common.SignalImpairmentsUi`，不改格式；Minibar 无新增设置或 IPC。实现与静态核对见 [TaskLog](../TaskLog/2026-11-06_frequency-samplerate-error-and-flatness-limits.md)。
 - 两项各以 0 表示无附加误差；组开关同时旁路/恢复已保存值。扫描/CW 的用户反馈方式后续统一设计，本轮不增加 tooltip 或摘要。
 
-## 四、Amplitude Compensation 与隐藏的 Level Offset（Settings → RF Hardware）
+## 四、Amplitude Compensation（Settings 独立分组）
 
 ### 4.1 位置
 
-放在 [devicesettingdialog.cpp](D:/development/vsg2.0/src/plugins/core/devicesettingdialog.cpp) 的 `RF Hardware` 分组（LO Mode、Output Port、Low Power）中。Level Offset 编辑控件暂时隐藏，当前可见布局：
+设备设置页在 `Trigger Out` 下方单独显示 `Amplitude Compensation` 分组。标题复用 `Amp. Comp.` 翻译键，中文显示为「幅度补偿」。开关和补偿表入口同行，已有错误提示横跨下一行。[实现](D:/development/vsg2.0/src/plugins/core/devicesettingdialog.cpp)
 
 ```mermaid
 flowchart TB
-    subgraph RFH["Settings → RF Hardware"]
-        direction TB
-        subgraph H1[" "]
-            direction LR
-            E1["LO Mode<br/>Auto"]
-            E2["Output Port<br/>RF"]
-        end
-        subgraph H2[" "]
-            direction LR
-            E3["Low Power<br/>[ ON | OFF ]"]
-        end
-        subgraph H3[" "]
-            direction LR
-            E5["Amplitude Compensation<br/>[ ON | OFF ]"]:::newBtn
-            E6["Amplitude Compensation Table…<br/>12 points · cable_A.csv"]:::newBtn
-        end
-        H1 --> H2 --> H3
+    subgraph AMP["Settings → Amplitude Compensation"]
+        direction LR
+        E5["Amplitude Compensation<br/>[ ON | OFF ]"]
+        E6["Amplitude Compensation Table…<br/>12 points · cable_A.csv"]
     end
     E6 --> TBL["Amplitude Compensation Editor（模态窗口）<br/>左侧频点表 / 右侧常驻操作按钮<br/>Apply / Close 各占一行"]
-    classDef newBtn stroke:#f39c12,stroke-width:3px
 ```
 
-不由损伤组开关控制，没有额外 State：Level Offset=0 即无偏移，Flatness 由自身 ON/OFF 控制。
+Amplitude Compensation 不由损伤组开关控制，继续使用自身 ON/OFF。
 
 Amplitude Compensation 使用 `userFlatnessBtn` 的开关样式，与 Trigger Output / Low Power / Invert Q 共用背景、checked、标题/值区间距及文字配色规则；深色主题使能为绿色，浅色主题沿用同类开关配色。按钮 checked 仍由 FlatnessEnabled 回写，启用门控不变。内部类型、对象名及 `common.UserFlatness` 配置键保持原名，CSV 列格式不变；默认导出名改为 `AmplitudeCompensation.csv`。
 
-### 4.2 Level Offset 定义与行为
+### 4.2 功率设置与常量补偿
 
-- **定义：外部路径有符号增益 O。** 正值为外接放大器增益，负值为线缆/夹具损耗。显示值 = API 电平 + O，API 请求 = 显示目标 − O。与 Keysight Amplitude Offset 定义一致（RF Output = entered − offset）。完整公式见 [损伤方案 3.3](signal_impairments_p0_interaction_design.md#33-level-offset-参考面与正负号统一定义)。
-- **修改 O 时保持 RF 端口输出不变，只改变显示值。** API 电平请求不变，CommonPanel 的 Level/RMS、LScan 起止电平、MScan 各点显示同时平移 O。这样把线损录入成 −10 dB 不会让端口功率突然升高 10 dB，避免损坏后级放大器或 DUT。
-- O 改变后，用户再输入新的 Level 时才按“请求 = 输入 − O”换算。MScan 已提交表和仍在编辑的草稿按同一规则平移显示，存储的仍是 API 电平，不重复换算。
-- **OFST 标记：** `OFST` 是 Offset 的缩写，提示 Level/RMS 已采用用户参考面。复用现有 UNLEVEL badge 机制（见 [Level 状态 badge](commonpanel_level_unlevel_badge_ui.md)），优先显示 `UNLEVEL`；无 UNLEVEL 且 O≠0 时显示 `OFST`。2026-11-10 起，补偿启用的 `AMPC` 可与 `OFST` 合并在同一 badge 中显示，UNLEVEL 激活时仍只显示告警；告警消除后恢复当前普通状态。隐藏 OFST 不关闭 Offset，也不改变换算。理由：开启 Offset 后显示值不再等于端口功率，没有标记时用户用功率计验证会误判仪器不准。RMS 使用同一参考面，不单独加标记。
-- 电平范围按 API 范围加 O 后显示；超出时虚拟键盘按偏移后的范围限制。
+2026-11-17 起删除 Level Offset 属性、隐藏 UI、SCPI、保存/恢复和全局加减换算。主窗、表格、键盘使用普通 Power，Main/Minibar/SCPI 直接使用功率数值。旧配置的 LevelOffset 自然忽略，不迁移成表，不平移已有 Level/RMS/扫描点。
 
-2026-11-05 参考面重构（静态实施，未编译/运行）：
-
-- `PowerReferencePlane` 持有 LevelOffset 属性，并以两个纯函数统一 `toUser(port,O)` / `toPort(user,O)` 的加减号规则。原 Core 私有的 `ReferencedPowerUnitAdapter` 已提取至 Business，继承 `PowerUnitAdapter`，供 Main/helper 共用；唯一加减规则在共享实现中，Core owner 的用户协议转换方法委托它，Business 不依赖 Core。
-- Core 注册的 creator 捕获 Offset 数值；新建 adapter 注入该快照，已打开的键盘继续用原快照显示和解析。`realValue`、validator 范围和 StepController 始终在端口域，绝对功率的文本才平移 O。Level、Sweep 起止、批量编辑 Start/Stop 使用 ReferencedPower；扫描功率差值与可编辑步长使用 PowerStep，不加 O。
-- O 变化先替换 creator，再发 `UnitAdapterFactory::contextChanged(type)`；NumericProperty 仅重新生成 displayText，不写属性值。MScan 只重绘 viewport，不发 dataChanged，不改变草稿、修订号或 Apply 状态。CommonPanel 刷新 Level/RMS 和 OFST 标记。
-- SCPI `POW:LEV`、`POW:RMS`、`SWE:POW:STAR/STOP`、`LIST:POW` 的 set/query 各在入口/出口换算；RMS 不可查询时原有错误及哨兵值保持。Minibar 协议 2 的数值、intent、完整请求及回写均为端口面，helper 通过共享 ReferencedPower 在显示/键盘边界转换一次。Offset 只调度 presentation 快照，不再推进 IPC Sweep revision；真实端口参数变化仍走既有 conflict/rebase。该 IPC revision 不等于 MScan 数据修订号。
-- 配置字段为 `common.LevelOffset`，属性 ID 为 `LevelOffset`；缺失时恢复 0，加载前按有限数值及 ±100 dB 范围校验，错误文案不再归入损伤参数。MScan CSV 始终为端口面，与测试台 Offset 无关。实施记录与成功标准见 [TaskLog](../TaskLog/2026-11-05_level-offset-reference-plane-boundary.md) 和 [审核修正](../TaskLog/2026-11-05_review-level-offset-boundaries.md)。
-
-2026-11-05 端口协议与 SCPI Offset 已静态实施：Main 持有 Offset，helper 只消费不可变展示上下文；原 Core 私有 adapter 提取至 Business 共享。POW:OFFS/POW:OFFS? 仅改变/查询软件参考面。Level API 下发/查询继续是端口值，设备层不感知 O。尚未编译/运行；实现、协议成对升级和验收要求见 [Level 参考面端口 IPC 与 API 接入准备](level_reference_plane_port_ipc_and_api_integration.md)。
+常量补偿通过两个不同频点设置相同补偿量实现，沿用原提交/开启流程及频点严格递增校验。设备 API 仍是唯一补偿执行路径；前端不二次叠加表值。完整边界见 [功率设置与补偿](level_reference_plane_port_ipc_and_api_integration.md)。
 
 ### 4.3 Amplitude Compensation（内部仍称 User Flatness）
 
-- **AMPC 标记（2026-11-10，静态实施）：** 主窗口 Level 顶部复用既有 badge，直接按 owner 的补偿启用状态显示 `AMPC`，关闭隐藏；仅加载/编辑草稿不新增标记，启用时当前频点补偿为 0 dB 也继续显示。普通状态沿用现有主题文字色，`UNLEVEL` 告警具有最高显示优先级，不能被补偿开关或表格更新覆盖。该标记只表示用户配置启用，不表示设备执行成功或功率实测通过；Minibar 不新增状态或 IPC。见 [AMPC TaskLog](../TaskLog/2026-11-10_add-level-ampc-badge.md)。
+- **UCOR 标记（2026-11-17，静态实施）：** 幅度补偿启用时 Level 显示 UCOR，关闭隐藏；当前频点补偿为 0 dB 时仍显示。UNLEVEL 独占 badge，补偿变化不能覆盖它；告警解除后按当前开关恢复 UCOR。标记只表示配置启用，不表示设备执行或实测完成。Minibar 不新增状态或 IPC。见 [本次 TaskLog](../TaskLog/2026-11-17_remove-level-offset-use-ucor.md)。
 - 表格在独立模态窗口中编辑（Settings 页空间不足以放整表），遵循 [qt-wayland-frameless-windows](D:/development/skills/.github/skills/qt-wayland-frameless-windows/SKILL.md) 的模态窗口规范；复用 MScan 的单元格数值键盘、选择和 CSV 导入导出，不带入 dwell 或扫描范围控件。
 - 布局参考用户提供的 VSG60 截图：左侧表格，右侧直接排列 Add Row、Delete、Load、Save As、Clear，底部 Apply 和 Close 各自独占一行；不提供 Restore table 按钮或“表格操作…”菜单。Clear 只清空草稿与草稿文件名，不自动改变正在使用的曲线或开关。
 - 编辑器最小宽度为 min(900 px, 创建时主窗宽度)，以保留频率/校正列的阅读空间；Controls::Dialog 显示时会 adjustSize，不能仅靠构造时 resize 设置宽度。行号列按内容紧凑自适应，不沿用 MScan 的固定 150 px；频率与校正两列平分剩余宽度。
@@ -204,7 +201,7 @@ Amplitude Compensation 使用 `userFlatnessBtn` 的开关样式，与 Trigger Ou
 - 数字键盘沿用 MScan 的单元格锚点：仍以 table 作为编辑触发对象，在 viewport 中按 visualRect(index) 创建透明、无焦点的临时 widget，并在 open 前 setAnchorWidget；主窗口继续作为 preferred overlay host。位置与边界由共享键盘处理，避免按整张表格底边弹出；anchor 随 keyboard 销毁清理。
 - 2026-11-10 起，频点间按 Hz 线性插值、表外首/末两点线性外推用于软件 `CORR:VAL?` 查询；输出仍由 API 执行，不据此宣称设备算法已验证。现有输入范围为 (0,100 GHz]、±100 dB，提交 2–999 点。
 - 编辑、导入、删行只改草稿；“应用表格”整表校验并提交，不逐格改变正在使用的曲线。应用不自动打开 Amplitude Compensation；没有合法已提交表时不能开启；有未应用草稿时，Settings 的 Amplitude Compensation Table 入口值区仍提示“有未应用修改”。关闭窗口保留草稿，不自动应用。
-- 交给 API 执行表补偿，前端不再把表值叠加到 level 上；Flatness 与 OFST 标记无关（它是按频率的端口补偿，显示值仍是用户参考面）。
+- 交给 API 执行表补偿，前端不再把表值叠加到 level 上；UCOR 只表示补偿开关，Level 数值仍保持原设置口径。
 
 2026-11-10 幅度补偿 SCPI 已静态接入，详见 [命令与兼容边界](scpi_review_and_integration_plan.md#2026-11-10幅度补偿-rs-核心命令)。PowerReferencePlane 内草稿改为独立频率/补偿两列，SCPI 和 GUI 共用；只有提交后配对的表进入原 TX 链路。列长不同时，GUI 缺失单元格显示为空，按顺序补齐短列后才可 Add，不自动补零；Delete 同步删除两列存在的对应行，Clear 清空两列。CSV 导出拒绝不等长草稿，保留数据和目标文件，不截断；保存对话框返回后重新读取当前草稿。远程写列重建模型会使旧键盘索引失效，避免覆盖新草稿。GUI Apply 及其呼吸提示也响应 SCPI 提交。
 
@@ -216,31 +213,15 @@ SCPI ON 提交并启用，GUI Apply 非空表保持原开关，空表清除并�
 - 单值和开关在一次输入确认后提交，不重新生成或下载波形；不增加全页 Apply。Flatness 整表保留独立“应用表格”，这是数据完整性边界。实际生效、下次启动生效和适用性限制的用户提示方式待 API 接入时统一设计。
 - 当前测试只在 UI 中保存参数和提交表格，不调用设备配置接口；已移除摘要和“UI 模拟”说明。真实设备回写以 API 确认/查询为准（实际带宽、clip 计数）。
 - 告警：数字饱和、开启 AWGN 后电平不足（UNLEVEL）进入现有设备状态反馈链（见 [设备状态 UI 反馈](device_status_ui_feedback.md)），Level 上的 UNLEVEL badge 照常显示。
-- 真实设备阶段：新增损伤按 impairment capabilities 开放；Frequency Error、Sample Rate Error、Level Offset、Flatness 按各自 API/业务适用性开放。
+- 真实设备阶段：新增损伤按 impairment capabilities 开放；Frequency Error、Sample Rate Error、Flatness 按各自 API/业务适用性开放。
 
 ## 六、与其他入口的一致性
 
-- 参数 owner：损伤 UI 参数由 core 侧 `SignalImpairmentsSettings` 持有；Level Offset 与 User Flatness 由 `PowerReferencePlane` 持有；CoreRuntimeServices 创建服务，PropertyManager 持有 Property，CommonDeviceProfile 聚合持久化。损伤页面只做输入适配，校验规则在 owner；Minibar 不接入损伤状态或编辑。AWGN/IQ API 与损伤 SCPI 接入是后续工作，既有绝对功率 SCPI 已使用统一参考面，User Flatness 与 Freq/Clock 已接入设备。
-- Preset / Reset：三组 State、Invert 恢复 OFF，误差/失衡/Offset 恢复 0，SNR/带宽恢复默认值；Level Offset 恢复 0、User Flatness 恢复 OFF、保留已提交表并由其恢复草稿，清除 SCPI 逻辑表名；工厂校准不受影响。设备重连后由前端恢复保存值。
+- 参数 owner：损伤 UI 和 SCPI 参数由 core 侧 `SignalImpairmentsSettings` 持有；User Flatness 由 `PowerReferencePlane` 持有；CoreRuntimeServices 创建服务，PropertyManager 持有 Property，CommonDeviceProfile 聚合持久化。损伤页面只做输入适配，校验规则在 owner；Minibar 不接入损伤状态或编辑。既有绝对功率 SCPI 已使用统一参考面，User Flatness 与 Freq/Clock 已接入设备。
+- Preset / Reset：三组 State、Invert 恢复 OFF，误差/失衡/Offset 恢复 0，SNR/带宽恢复默认值；User Flatness 恢复 OFF、保留已提交表并由其恢复草稿，清除 SCPI 逻辑表名；工厂校准不受影响。设备重连后由前端恢复保存值。
 - 保存：新配置不再写 `SignalImpairmentsUi.Enabled`。读取已有 UI 测试配置时，旧 Enabled 必须为数值 0/1；若为 0，恢复时关闭三个组并保留各数值，维持原旁路状态，避免加载后意外开启。若为 1，按已保存组状态恢复。不额外保存“上次启用组合”。
 - Minibar：不包含损伤按钮、聚合状态或编辑，也不传输损伤 IPC 字段；RemoteMinibarService 不再直接订阅损伤 owner。Main 参数、持久化和 TX/API 链路独立保留。
-- SCPI 草案（风格参照 R&S/Keysight 通用写法，最终名称另定）：
-
-```text
-[:SOURce]:AWGN:STATe ON|OFF
-[:SOURce]:AWGN:SNR <dB>
-[:SOURce]:AWGN:BWIDth <Hz>
-[:SOURce]:IQ:IMPairment:STATe ON|OFF
-[:SOURce]:IQ:IMPairment:INVert ON|OFF
-[:SOURce]:IQ:IMPairment:GAIN <dB>
-[:SOURce]:IQ:IMPairment:QUADrature <deg>
-[:SOURce]:IQ:IMPairment:OFFSet:I|Q <pct>
-[:SOURce]:IMPairment:FCLock:STATe ON|OFF
-[:SOURce]:FREQuency:ERRor <Hz>
-[:SOURce]:SRATe:ERRor <ppm>
-[:SOURce]:POWer:OFFSet <dB>
-[:SOURce]:CORRection:STATe ON|OFF
-```
+- SCPI 已接入 12 对设置与查询，适用范围和保存边界见 [信号损伤 SCPI 接口设计](signal_impairments_scpi_design.md)。设备验收待执行。
 
 ## 七、整体导航关系
 
@@ -249,13 +230,13 @@ flowchart LR
     CP["CommonPanel"] -->|RF| RFP["RF 设置"]
     CP -->|MOD| BIZ["当前基带业务页<br/>(ARB/Multitone/AWGN 业务…)"]
     CP -->|Sweep| SWP["Sweep 页<br/>Enabled + Sweep Type"]
-    IMPP["Impairments 单页<br/>保留内部页面，无 CommonPanel 入口"]:::newPage
+    LIST["FancyTabWidget 基带列表"] -->|末项 Signal Impairments| IMPP["Impairments 单页"]:::newPage
     CP -->|Settings| DSP["General Settings"]
     IMPP --> G1["I/Q"]
     IMPP --> G2["AWGN"]
     IMPP --> G3["Freq/Clock"]
-    DSP --> RFH["RF Hardware<br/>Amplitude Compensation<br/>Level Offset 入口隐藏"]
-    RFH -. OFST / AMPC 标记及显示参考面 .-> CP
+    DSP --> AMP["Amplitude Compensation"]
+    AMP -. UCOR 标记 .-> CP
     classDef newPage stroke:#f39c12,stroke-width:3px
 ```
 
@@ -264,10 +245,10 @@ flowchart LR
 ```mermaid
 flowchart LR
     BB["基带 IQ<br/>(当前业务)"] --> INV["Invert"] --> IMB["Gain Imbalance<br/>Quadrature Skew"] --> OFS["I/Q Offset"] --> N["+ AWGN"] --> CAL["工厂校准"] --> DAC["DAC"]
-    DAC --> RFC["RF：fc+Δf, Fs·(1+ε)<br/>Level 显示 − O, Flatness"] --> OUT["RF Out"]
+    DAC --> RFC["RF：fc+Δf, Fs·(1+ε)<br/>Level 设置, Amplitude Compensation"] --> OUT["RF Out"]
 ```
 
-注意：现有 `AwgnModulation`（[awgnmodulation.h](D:/development/vsg2.0/src/plugins/htra/awgnmodulation.h)）是“纯噪声波形”业务，与本页“叠加在信号上的 AWGN”不同，两者共存；该区别目前写在代码注释中，页面组名简写为 AWGN。
+注意：现有 `AwgnModulation`（[awgnmodulation.h](D:/development/vsg2.0/src/plugins/htra/awgnmodulation.h)）是“纯噪声波形”业务，与本页“叠加在信号上的 AWGN”不同，两者共存；该区别目前写在代码注释中，页面组名为 AWGN Noise。
 
 ## 八、真实设备接入前待确认
 
@@ -275,3 +256,115 @@ flowchart LR
 2. UI owner 已放在 core；真实设备接入后的设备线程/确认回写边界待定。
 3. 当前按四个可见按钮静态核算宽度，仍需目标屏幕实测。
 4. Preset 保留已提交 Flatness 表、关闭开关并恢复草稿已按 2026-11-10 授权合同保留，运行验收待执行。
+
+## 九、状态提示布局与 AWGN 带宽限制优化设计
+
+日期：2026-11-13。状态：待实施。依据当前分支 `eb0c2233` 及用户提供的截图/操作反馈；本节替代的是“将状态全文追加到 GroupBox 标题”的交互方案，不表示代码已经更改。
+
+### 9.1 当前出现的两种情况
+
+| 操作 | 当前代码状态 | 实际含义 |
+| --- | --- | --- |
+| 基带选择纯 AWGN，损伤 AWGN 或 I/Q 组 ON | `NotApplied` | 当前产品不对纯噪声源追加这两组损伤，纯噪声业务正常输出；不是带宽错误，也不是计算得到零信号 |
+| 支持的离线 Playback 上开启 AWGN，Bn>该波形 Fs | `Failed` | 不能在当前采样率下生成所要求的噪声总带宽，损伤记录不下发；需修改带宽或波形 |
+
+纯 AWGN 的明确旁路来自 [awgnmodulation.h](/D:/development/vsg2.0/src/plugins/htra/awgnmodulation.h:39) 的 `supportsIqImpairments()=false`，由 [TX 分派](/D:/development/vsg2.0/src/plugins/core/txsessionservice.cpp:790) 调用 `markNotApplied()`。纯噪声有 RMS，但本功能的 SNR 参考是有用信号功率与新增噪声功率；本版没有定义“以现有纯噪声为信号再加噪”的产品模式。I/Q 也随当前能力合同旁路，这不是说物理上无法对噪声做 I/Q 变换。
+
+Bn>Fs 的失败来自 [iqimpairments.cpp](/D:/development/vsg2.0/src/libs/utils/iqimpairments.cpp:267)。当前原文是 `Noise bandwidth must not exceed the sample rate (%1 Hz)`，其中 `%1` 是本次处理记录的采样率。页面应把这个失败完整显示出来，不能让用户只看到组开关仍为 ON。
+
+### 9.2 布局和颜色
+
+三个组标题始终只显示 `I/Q`、`AWGN`、`Freq/Clock`，不包含 Processing、Not applied 或错误正文。当前 [updateTitles](/D:/development/vsg2.0/src/plugins/core/signalimpairmentspanel.cpp:135) 的长标题会增加所在组的最小宽度；外层即使设置两列 stretch=1:1，也不能忽略这种内容最小宽度。
+
+在滚动内容顶部、三组控件之前放一个横跨两列的状态文本区域。没有待处理状态时隐藏；有状态时占满可用宽度，正文自动换行，只增加行高，不增加某一列的最小宽度。原有 I/Q 左列跨两行、AWGN 右上、Freq/Clock 右下布局和组内参数位置保持。
+
+```text
+┌─────────────────────────────────────────────────────────┐
+│ AWGN：噪声带宽 66 MHz 超过当前波形采样率 65 MSa/s。       │
+│ 请将噪声带宽设为不大于 65 MHz，或使用更高采样率的波形。  │
+└─────────────────────────────────────────────────────────┘
+┌──────────── I/Q ────────────┐ ┌──────── AWGN ────────────┐
+│ Enabled       Invert       │ │ Enabled                  │
+│ Gain          Skew         │ │ SNR        Noise BW      │
+│ I Offset      Q Offset     │ └──────────────────────────┘
+│                            │ ┌────── Freq/Clock ────────┐
+│                            │ │ Enabled                  │
+│                            │ │ Freq Error   Rate Error  │
+└────────────────────────────┘ └──────────────────────────┘
+```
+
+提示控件采用普通 `QLabel`、`PlainText` 和 wordWrap；横向 size policy 使用 Ignored，使长文本不参与撑宽约束；纵向按实际换行高度布局。不要通过固定整列宽度、裁断错误正文或缩小参数字号解决问题。提示区在滚动内容内，窄屏必要时增加纵向滚动。
+
+深浅色文字在主题 CSS 中显式指定，不在 C++ 硬编码。普通处理状态和不适用说明使用主题正文色；真正的失败使用已有警告配色：暗色可复用清晰的浅黄，浅色使用对比充分的深红。组标题继续使用主题标题色，并检查 QGroupBox 本体及标题绘制均可读。样式选择器限定到本页的提示 label，避免影响按钮内部 QLabel。12 份品牌/语言深浅主题一起调整，状态文案进入既有三语 Language.xlsx。
+
+用户反馈的黑字是有效的视觉缺陷证据；尚未运行复现，不把具体 palette 或 QSS 匹配原因当成已确认根因。独立 label 的显式主题规则提供直接的修复边界。
+
+### 9.3 状态文案和行为
+
+| 状态 | 提示示例 | 行为 |
+| --- | --- | --- |
+| 两组 OFF，或 Idle | 不显示提示 | 保存各输入；原有旁路和静音语义不变 |
+| Processing | `AWGN / I/Q：正在生成损伤波形…` | 只列当前开启的组；不显示模态弹窗，不输出干净波形替代 |
+| NotApplied，纯 AWGN | `未应用：纯噪声 AWGN 基带不支持此损伤，请选择支持的离线 Playback 信号。` | 普通说明色；组值保留，纯噪声业务继续；不能标成“错误” |
+| NotApplied，其他不适用路径 | `未应用：当前输出模式不支持离线 IQ 损伤。`，附具体模式原因 | 保留输入，不自动切换基带或关闭组 |
+| Failed，带宽超限 | `AWGN：噪声带宽 66 MHz 超过当前波形采样率 65 MSa/s。请将带宽设为不大于 65 MHz，或使用更高采样率的波形。` | 警告色；保留请求值，修正后自动重新处理 |
+| Applied | 清除提示 | 只说明损伤副本已生成；不把此处理器状态宣称为设备已输出或 RF 实测通过 |
+
+两组共享一条损伤处理记录。如果 AWGN 参数非法导致生成失败，即使 I/Q 参数合法，也不能暗中下发“仅 I/Q”或干净波形；提示只显示一次，并指出失败原因在 AWGN，避免两个组标题重复同一条错误。Freq/Clock 不作为 AWGN/IQ 处理器错误的归属组。
+
+校验继续在 DSP/处理 owner 完成，页面展示其状态及原因，不复制一套 Bn/Fs 业务校验。NotApplied 原因由了解业务适用性的 TX/processor 边界提供，页面不自行按业务名称重新判定。状态正文应对应本次请求/结果快照，尤其是其中的 Fs；不能用后一次 UI 采样率覆盖旧结果中的数值。沿用既有 generation 相关性，不新增锁、轮询或重试队列。
+
+### 9.4 为什么限制 Bn 不大于 Fs
+
+这里的 Fs 是**当前离线 IQ 波形的复采样率**，不是设备最高采样率；Bn 是以基带 0 Hz 为中心的**噪声双边总宽度**，不是单边截止频率，也不是信号占用带宽。
+
+```text
+复数离散 IQ 的一个不重复频率区间：[-Fs/2, +Fs/2)
+请求的噪声频带：                  [-Bn/2, +Bn/2]
+必须满足：Bn/2 ≤ Fs/2，即 Bn ≤ Fs
+```
+
+当前实现把噪声加在同一条 IQ 数组里，信号和噪声使用相同 Fs。若 Bn>Fs，超出 Nyquist 区间的噪声会折叠进来，无法形成所要求的独立总带宽，噪声带宽与 SNR 积分定义也会失真。因此当前代码拒绝，而不是静默裁到 Fs。
+
+这不是要求 `Bn≤Fs/2`：Fs/2 是每侧的上限，两侧合计总带宽为 Fs。Bn=Fs 时代码使用未低通的白噪声路径，数学上允许；靠近 Nyquist 边缘的实际射频平坦度仍受硬件重建链路影响，应另按测试方案验收。
+
+### 9.5 Count 为 10 且 Spacing 为 5 MHz 的例子
+
+按本分支默认中心音遮盖开启、十根候选音全部启用，基带频率为：
+
+```text
+-25, -20, -15, -10, -5, 0, 5, 10, 15, 20 MHz
+最大绝对基带频率 = 25 MHz
+生成器最低 Fs = 1.25 × 2 × 25 MHz = 62.5 MSa/s
+当前规划器优先取 5 MHz 的整数倍：若设备支持，通常 Fs = 65 MSa/s
+```
+
+这里的向上对齐是现有多音采样率选择器的策略，**不是 AWGN 新增要求，也不是保证循环记录连续的数学必要条件**。`lowestAlignedSampleRate()` 的优先调用从 `7c117252`（2026-07-17）就已存在，11 月 10 日损伤提交没有修改这段采样率规划。
+
+精确循环真正要求每个音满足 `N·f/Fs` 为整数，其中 N 是整条记录样点数。Fs=62.5 MSa/s、基频 5 MHz 时，每个周期为 12.5 个样点，但两个周期恰好是 25 个样点，因此 N 取 25 的倍数同样可以精确循环。Fs=65 MSa/s 则每周期为 13 个样点。当前 `chooseSampleCount()` 本身已支持有理数周期；所以不能将 62.5 MSa/s 说成不合法，或声称为了 AWGN 必须抬高到 65。
+
+依据：[生成需求](/D:/development/vsg2.0/src/plugins/htra/multitonegenerator.cpp:505)、[采样率规划](/D:/development/vsg2.0/src/plugins/htra/multitonemodulation.cpp:109)。在该条件下，66 MHz 噪声要求 ±33 MHz，而 65 MSa/s 的记录只能表示 ±32.5 MHz，因此超出 1 MHz 总宽度。
+
+这是代码条件推导，不是从截图中读到了 65 MSa/s。用户补充此前无损伤时实际为 62.5 MSa/s；该值数学上有效，不能归因于“开启损伤导致采样率上调”。此前具体版本、设备能力或规划路径尚未定位。若禁用部分音、加载旧 mask 配置，或设备采样率能力不同，实际 Fs 也可能不同；错误文案和判定必须使用本次实际 provider Fs。设备即使支持 125/200/400 MSa/s，也不能让一条仍以 65 MSa/s 播放的 IQ 记录直接表示 66 MHz 噪声；若实际 Fs=62.5 MSa/s，噪声总带宽上限就是 62.5 MHz。
+
+对这个例子，当前最直接的操作是把噪声带宽降到实际 Fs 以内，例如确认 Fs=65 MSa/s 后设 64 MHz，并验收噪声过渡带和硬件边缘表现。若测试必须使用 66 MHz 噪声，应改用实际 Fs≥66 MSa/s 的支持波形。
+
+如果以后要求 AWGN 带宽自动抬高 Multitone Fs，需要让带宽参与原始波形规划，在设备允许范围内求满足信号、噪声、精确周期和容量的共同采样率，然后重新生成、处理和下载。当前 Core 后处理无法仅修改 Fs 数字来完成：直接改变播放率会连带改变原多音频率；仅补零增加 N 也不会扩大采样带宽。本轮不引入这种跨来源自动重规划。
+
+另外，过窄带宽是另一类失败。现有 Blackman FIR 设计将抽头数限制为 8191，在当前过渡带要求下近似要求 `Bn≥27.5·Fs/8191`；超出计算能力时显示实际最小带宽及“带宽过窄”原因，不与 Bn>Fs 混用同一说明。
+
+### 9.6 实施边界和验收
+
+拟修改页面的标题刷新逻辑，增加一个跨列状态 label；processor 沿用现有 State，提供不适用原因及失败详情；DSP 带宽超限文案补齐请求带宽、实际 Fs 和改正方法。配套同步 12 份主题和三语翻译。不新增总开关、全页 Apply、派生功率读数、模态提示或损伤 SCPI。
+
+验收顺序：
+
+1. 打开两组并制造最长错误；检查三个标题始终固定，左右列宽不因错误正文长度或提示语言变化而重新分配，正文完整换行。
+2. 在暗/亮主题及 1024×600、Windows 窗口中检查普通、不适用、错误三种文本均可读；提示只影响高度，不裁参数按钮。
+3. 纯 AWGN 基带 + 损伤组 ON：显示未应用及纯噪声原因，纯噪声继续输出；不出现错误警告。
+4. 普通 Multitone 获取实际 Fs 后令 Bn>Fs：显示请求值和该 Fs；两组均 ON 时只显示一次失败，不下发干净或仅 I/Q 波形。
+5. Bn 修正为合法值后自动经过 Processing 并清除提示；再关闭 AWGN，保留其超限输入但仅使用 I/Q 时不应继续被 AWGN 参数阻断。
+6. 检查 Bn=Fs 允许白噪声路径、过窄带宽显示不同原因；正常配置不因本次 UI 调整改变 DSP 结果。
+7. 处理中切换业务/Fs，确认提示最终属于最新请求；关闭组、返回支持业务、重新连接后的文字与状态一致。
+
+相关：[实现审查与测试方案](awgn_iq_impairments_review_and_test_plan.md)、[本次 TaskLog](../TaskLog/2026-11-13_impairments-status-layout.md)。

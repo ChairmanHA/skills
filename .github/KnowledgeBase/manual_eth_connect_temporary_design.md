@@ -77,6 +77,10 @@
 - `closeForSwitch()` 真正被调用时，ETH 走完整释放；正常切到非空目标时由 `DeviceManager` 通用 retain 策略跳过该函数
 - `updateRealTimeStatus()` 在检测到 ETH 已断开时，仍会执行一次 `device_close()` 释放底层资源，而不是沿用旧的“断开后析构跳过 close”语义
 
+2026-11-16：ETH 风扇默认阈值改为依据远端 HLC。`FancyDevice::open()` 对型号 122/123，通过目标 IP 的 System_Server（9000 端口）执行一次 `hlc --device-kernel-info-all` 并确认执行成功；成功采用 50°C，其他型号仍采用 40°C。服务不可用、超时、协议或命令失败时记录原因并沿用默认 40°C，不中断设备连接。查询采用桌面 System_Client 的 PacketCodec 协议，由已有 I/O worker 同步执行，每次阻塞等待使用该 ETH 目标的 timeout，查询总耗时可能超过单次 timeout；不新增线程、重试或周期查询。阈值仍存于该 `FancyDevice` 的 `m_fanAutoThresholdCelsius`，由原有 `device_config_fan()` 下发；retained 设备切回时复用现有值，不重复查询。
+
+该增量只影响风扇默认阈值。USB 继续按本机 HLC 判定；全局 `Plugin::hasHlcService()`、电池显示、自动关机、Low Power、菜单与设备切换机制保持原语义。仅完成静态检查，尚未编译或设备验收；协议与验收边界见 [实施记录](../TaskLog/2026-11-16_implement-eth-hlc-fan.md)。
+
 这样做的目的，是最大化复用现有能力：
 
 - `configuration()`

@@ -55,6 +55,8 @@ bash scripts/build.sh --list
 旧参数 `rk3588`、`gcc`、`gcc_x86_64`、`x86_64`、`aarch64` 仍作为兼容别名，
 新命令和文档只使用上表三个明确名称。
 
+AArch64 各 profile 按品牌和语言共用输出目录。同一 checkout 连续打包同品牌、同语言时，后一次打包会清理前一次的产物。
+
 ### 2.2 Ubuntu AArch64
 
 ```bash
@@ -67,7 +69,7 @@ JOBS="$(nproc)" bash scripts/build.sh \
 
 ```text
 build/build_rk3588_standard_cn/
-build/linux_ubuntu_aarch64/standard/cn/SGStudio.tar.gz
+build/linux_aarch64/standard/cn/SGStudio.tar.gz
 ```
 
 该 profile：
@@ -92,7 +94,7 @@ JOBS="$(nproc)" bash scripts/build.sh \
 
 ```text
 build/build_gcc_standard_cn/
-build/linux_ubuntu_x86_64/standard/cn/SGStudio.tar.gz
+build/linux_x86_64/standard/cn/SGStudio.tar.gz
 ```
 
 该 profile 使用 250 本机 GCC、Qt 5.15.18 x86_64 和 X11/xcb，不构建
@@ -110,7 +112,7 @@ JOBS="$(nproc)" bash scripts/build.sh \
 
 ```text
 build/build_aarch64_standard_cn/
-build/linux_raspberry_pi_cross_aarch64/standard/cn/SGStudio.tar.gz
+build/linux_aarch64/standard/cn/SGStudio.tar.gz
 ```
 
 该 profile 使用 GCC 7 AArch64 交叉工具链、Qt 5.15.18、QtWayland、xcb 与
@@ -120,9 +122,9 @@ LayerShellQt。LayerShellQt 只在 Wayland MiniBar helper 中启用；X11 下 he
 - Qt Wayland、xcb 与 LayerShellQt runtime 全部完整，且两套 QPA plugin 的必需
   间接依赖都能解析；
 - 所有 ELF 均为 AArch64；
-- 除用户明确接受的闭源 modulation 库外，不超过 RK3588 已知的
-  `GLIBC_2.27`、`GLIBCXX_3.4.25`、`CXXABI_1.3.11`；例外仅限归档内
-  `lib/libgenSignalWave.so` 的 `GLIBC_2.29`，不会放宽其他 ELF；
+- 不再检查 ELF 的 `GLIBC_*`、`GLIBCXX_*`、`CXXABI_*` 版本需求（2026-11-20 移除）。
+  新版 `libgenSignalWave.so` 需要 `GLIBC_2.29`、`GLIBCXX_3.4.29`，高于 RK3588
+  的 2.27/3.4.25；包仍会生成，目标机兼容性需在发布前单独确认；
 - 不捆绑 glibc、loader、libstdc++、libgcc 或 GPU/Mesa/DRM runtime；
 - 不保留 `/home`、`/opt`、`/tmp` 构建机动态路径；
 - 主程序具有可继承的 `$ORIGIN/../lib` `DT_RPATH`，`qt.conf` 使用包内相对路径。
@@ -188,7 +190,7 @@ bash scripts/build_pi.sh aarch64 standard cn SGStudio --watermark off
 
 ```text
 build/build_pi_native_standard_cn/
-build/linux_pi_native_aarch64/standard/cn/SGStudio.tar.gz
+build/linux_aarch64/standard/cn/SGStudio.tar.gz
 ```
 
 ### 3.1 为什么它是最终防火墙
